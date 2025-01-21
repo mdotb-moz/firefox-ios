@@ -46,6 +46,7 @@ jobs:
           next_version=$(echo "$output" | tail -n 1) # get the last line of the output
           echo "Next version is: v${next_version}"
           echo "next_version=${next_version}" >> $GITHUB_ENV
+          echo "current_date=$current_date" >> $GITHUB_ENV
 
       # Step 5: Check for changes
       - name: Commit changes if any
