@@ -5,7 +5,7 @@ import re
 # Define constants
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # Navigate one level up from "test"
 BITRISE_YML = os.path.join(BASE_DIR, "bitrise.yml")
-WORKFLOW_NAME = "firefox_configure_build"
+# WORKFLOW_NAME = "firefox_configure_build"
 BITRISE_STEPLIB_URL = "https://api.github.com/repos/bitrise-io/bitrise-steplib/contents/steps"
 
 # GitHub Access Token
