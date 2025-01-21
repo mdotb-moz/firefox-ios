@@ -34,6 +34,19 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Determine PR Version Number
+        id: versioning
+        run: |
+          # This step is used to determine the next version number for the PR title
+          # The output includes debugging for the piped commands that generate
+          # the version number and the last line is the version number itself
+
+          output=$(bash test-fixtures/ci/get-next-pr-version)
+          echo "$output"
+          next_version=$(echo "$output" | tail -n 1) # get the last line of the output
+          echo "Next version is: v${next_version}"
+          echo "next_version=${next_version}" >> $GITHUB_ENV
+
       # Step 5: Check for changes
       - name: Commit changes if any
         run: |
@@ -48,8 +61,9 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           branch: update/bitrise-steps
-          commit-message: "Update outdated Bitrise steps"
-          title: "Bump - Update outdated Bitrise steps"
+          commit-message: "Update [v${{ env.next_version }}] outdated Bitrise steps ${{ env.current_date }}"
+          title: "Bump [v${{ env.next_version }}] Update outdated Bitrise steps ${{ env.current_date }}"
           body: |
             This PR updates the outdated Bitrise steps to their latest versions.
-          # team-reviewers: mdotb-moz 
+          # team-reviewers: firefox ios
+          reviewers: mdotb-moz
