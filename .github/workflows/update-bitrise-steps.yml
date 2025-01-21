@@ -52,4 +52,4 @@ jobs:
           title: "Bump - Update outdated Bitrise steps"
           body: |
             This PR updates the outdated Bitrise steps to their latest versions.
-          team-reviewers: mdotb-moz 
+          # team-reviewers: mdotb-moz 
