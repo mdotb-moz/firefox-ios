@@ -1,0 +1,55 @@
+name: Update Outdated Bitrise Steps Versions
+
+on:
+  schedule:
+    - cron: "0 3 * * 0" # Runs every Sunday at 03:00 UTC
+  workflow_dispatch: # Allow manual triggering
+
+jobs:
+  update-steps:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Check out the repository
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      # Step 2: Set up Python
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.x"
+
+      # Step 3: Install dependencies
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+
+      # Step 4: Run the script to update Bitrise steps
+      - name: Run update script
+        id: update_script
+        run: |
+          python update_bitrise_steps.py
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Step 5: Check for changes
+      - name: Commit changes if any
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git diff --quiet || git commit -am "Update outdated Bitrise steps"
+          git push -u origin update/bitrise-steps || echo "No changes to push."
+
+      # Step 6: Create a Pull Request
+      - name: Create a Pull Request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: update/bitrise-steps
+          commit-message: "Update outdated Bitrise steps"
+          title: "Bump - Update outdated Bitrise steps"
+          body: |
+            This PR updates the outdated Bitrise steps to their latest versions.
+          team-reviewers: fxios automation 
