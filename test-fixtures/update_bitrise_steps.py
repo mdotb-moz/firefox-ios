@@ -28,7 +28,9 @@ SKIPPED_WORKFLOWS = {
     "focus_SPM_Nightly",
     "focus_SPM_Beta",
     "SPM_Nightly_Beta_Only",
-    "SPM_Deploy_Prod_Beta"
+    "SPM_Deploy_Prod_Beta",
+    "SPM_Deploy_Beta_Only",
+    "focus_release"
 }
 
 def fetch_latest_version(step_id):
@@ -90,7 +92,7 @@ def update_bitrise_yaml():
             if current_version != latest_version:
                 updated_steps.append(f"{step_id}: {current_version} -> {latest_version}")
                 line = line.replace(f"{step_id}@{current_version}", f"{step_id}@{latest_version}")
-                
+
         updated_lines.append(line)
 
     # Write back the updated file
