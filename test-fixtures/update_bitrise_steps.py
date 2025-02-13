@@ -75,9 +75,11 @@ def update_bitrise_yaml():
         workflow_match = re.match(r"^\s*([a-zA-Z0-9\-_]+):\s*$", line)
         if workflow_match:
             workflow_name = workflow_match.group(1)
-            skip_workflow = workflow_name in SKIPPED_WORKFLOWS
-            if skip_workflow:
+            if workflow_name in SKIPPED_WORKFLOWS:
                 print(f"Skipping entire workflow: {workflow_name}")
+                skip_workflow = True  # Start skipping lines
+            else:
+                skip_workflow = False  # Reset skip when new workflow starts
                 
         # If inside a skipped workflow, do NOT modify anything
         if skip_workflow:
