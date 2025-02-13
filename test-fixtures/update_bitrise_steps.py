@@ -78,14 +78,11 @@ def update_bitrise_yaml():
                 print(f"Skipping entire workflow: {workflow_name}")
 
         # If inside a skipped workflow, wait until `steps:` appears before stopping tracking
-        if skip_workflow:
-            updated_lines.append(line)
-            if re.match(r"^\s*steps:\s*$", line):  # Detect `steps:`
-                inside_steps_block = True
-            continue
+        if skip_workflow and re.match(r"^\s*steps:\s*$", line):
+            inside_skipped_steps = True  # Now we are inside steps and should skip all below
 
-        # Ensure we keep skipping steps inside a skipped workflow
-        if skip_workflow and inside_steps_block:
+        # Skip all lines inside a skipped workflow's `steps:` section
+        if skip_workflow and inside_skipped_steps:
             updated_lines.append(line)
             continue
 
