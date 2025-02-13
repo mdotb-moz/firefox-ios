@@ -20,6 +20,17 @@ LOCKED_VERSIONS = {
     "git-clone": "6.2"
 }
 
+"""
+We need to skip some workflows because updating the steps cause some failure and break the workflow
+"""
+# Workflows to skip completely
+SKIPPED_WORKFLOWS = {
+    "focus_SPM_Nightly",
+    "focus_SPM_Beta",
+    "SPM_Nightly_Beta_Only",
+    "SPM_Deploy_Prod_Beta"
+}
+
 def fetch_latest_version(step_id):
     """Fetch the latest version of a step from the Bitrise Step Library."""
     if step_id in LOCKED_VERSIONS:
@@ -55,8 +66,25 @@ def update_bitrise_yaml():
     # Placeholder for updated steps
     updated_lines = []
     updated_steps = []
+    skip_workflow = False # Flag to track whether we are inside a skipped workflow
 
     for line in content:
+        # Detect if we are inside a workflow
+        workflow_match = re.match(r"^\s*([a-zA-Z0-9\-_]+):\s*$", line)
+        if workflow_match:
+            workflow_name = workflow_match.group(1)
+            if workflow_name in SKIPPED_WORKFLOWS:
+                print(f"Skipping entire workflow: {workflow_name}")
+                skip_workflow = True
+            else:
+                skip_workflow = False # Reset the flag when a new workflow starts
+
+        # If inside a skipped workflow, ignore this line
+        if skip_workflow:
+            updated_lines.append(line)
+            continue
+
+        # Match step lines and update if necessary
         match = re.match(r"^\s*-\s*([a-zA-Z0-9\-_]+)@([\d\.]+):", line)
         if match:
             step_id, current_version = match.groups()
