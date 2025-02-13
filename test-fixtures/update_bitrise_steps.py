@@ -55,34 +55,28 @@ def fetch_latest_version(step_id):
         return None
 
 def update_bitrise_yaml():
-    """Update outdated steps in the Bitrise YAML file, except locked workflows."""
+    """Update outdated steps in the Bitrise YAML file, except in skipped workflows."""
     with open(BITRISE_YML, "r") as file:
         content = file.readlines()
 
     updated_lines = []
     updated_steps = []
     skip_workflow = False  # Track if we are inside a skipped workflow
-    inside_steps_section = False  # Track if we are inside `steps:` under a skipped workflow
 
     for line in content:
-        # Detect workflow names and determine if they should be skipped
+        # Detect workflow names
         workflow_match = re.match(r"^\s*([a-zA-Z0-9\-_]+):\s*$", line)
         if workflow_match:
             workflow_name = workflow_match.group(1)
             skip_workflow = workflow_name in SKIPPED_WORKFLOWS
-            inside_steps_section = False  # Reset when a new workflow starts
 
             if skip_workflow:
                 print(f"Skipping entire workflow: {workflow_name}")
 
-        # Detect `steps:` inside a skipped workflow and ensure we skip everything after
-        if skip_workflow and re.match(r"^\s*steps:\s*$", line):
-            inside_steps_section = True  # Now we are inside steps and should skip all below
-
-        # Skip all lines inside a skipped workflow's `steps:` section
-        if skip_workflow and inside_steps_section:
+        # Ensure all steps inside a skipped workflow are ignored
+        if skip_workflow:
             updated_lines.append(line)
-            continue
+            continue  # ✅ This is the critical fix! Do NOT process any step in a skipped workflow
 
         # Match step lines and update only if we are NOT inside a skipped workflow
         match = re.match(r"^\s*-\s*([a-zA-Z0-9\-_]+)@([\d\.]+):", line)
