@@ -64,7 +64,7 @@ def update_bitrise_yaml():
     updated_lines = []
     updated_steps = []
     skip_workflow = False # Flag to track whether we are inside a skipped workflow
-    inside_steps = False # Track if we have reached 'steps:' in a workflow
+    inside_steps_block = False # Track if we have reached 'steps:' in a workflow
 
     for line in content:
         # Detect if a new workflow starts
@@ -72,21 +72,26 @@ def update_bitrise_yaml():
         if workflow_match:
             workflow_name = workflow_match.group(1)
             skip_workflow = workflow_name in SKIPPED_WORKFLOWS
-            inside_steps = False  # Reset when a new workflow starts
+            inside_steps_block = False  # Reset when a new workflow starts
 
             if skip_workflow:
                 print(f"Skipping entire workflow: {workflow_name}")
 
         # If inside a skipped workflow, wait until `steps:` appears before stopping tracking
-        if skip_workflow and not inside_steps:
+        if skip_workflow:
             updated_lines.append(line)
             if re.match(r"^\s*steps:\s*$", line):  # Detect `steps:`
-                inside_steps = True
+                inside_steps_block = True
+            continue
+
+        # Ensure we keep skipping steps inside a skipped workflow
+        if skip_workflow and inside_steps_block:
+            updated_lines.append(line)
             continue
 
         # Match step lines and update if necessary
         match = re.match(r"^\s*-\s*([a-zA-Z0-9\-_]+)@([\d\.]+):", line)
-        if match:
+        if match and not skip_workflow:
             step_id, current_version = match.groups()
             latest_version = fetch_latest_version(step_id)
             if current_version != latest_version:
