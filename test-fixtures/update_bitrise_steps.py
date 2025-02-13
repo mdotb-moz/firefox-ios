@@ -62,7 +62,7 @@ def update_bitrise_yaml():
     updated_lines = []
     updated_steps = []
     skip_workflow = False  # Track if we are inside a skipped workflow
-    inside_skipped_steps = False  # Track if we are inside `steps:` under a skipped workflow
+    inside_steps_section = False  # Track if we are inside `steps:` under a skipped workflow
 
     for line in content:
         # Detect workflow names and determine if they should be skipped
@@ -70,17 +70,17 @@ def update_bitrise_yaml():
         if workflow_match:
             workflow_name = workflow_match.group(1)
             skip_workflow = workflow_name in SKIPPED_WORKFLOWS
-            inside_skipped_steps = False  # Reset when a new workflow starts
+            inside_steps_section = False  # Reset when a new workflow starts
 
             if skip_workflow:
                 print(f"Skipping entire workflow: {workflow_name}")
 
         # Detect `steps:` inside a skipped workflow and ensure we skip everything after
         if skip_workflow and re.match(r"^\s*steps:\s*$", line):
-            inside_skipped_steps = True  # Now we are inside steps and should skip all below
+            inside_steps_section = True  # Now we are inside steps and should skip all below
 
         # Skip all lines inside a skipped workflow's `steps:` section
-        if skip_workflow and inside_skipped_steps:
+        if skip_workflow and inside_steps_section:
             updated_lines.append(line)
             continue
 
@@ -104,6 +104,6 @@ def update_bitrise_yaml():
         print("\n".join(updated_steps))
     else:
         print("No updates were necessary.")
-        
+
 if __name__ == "__main__":
     update_bitrise_yaml()
