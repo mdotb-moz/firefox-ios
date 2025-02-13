@@ -25,12 +25,7 @@ We need to skip some workflows because updating the steps cause some failure and
 """
 # Workflows to skip completely
 SKIPPED_WORKFLOWS = {
-    "focus_SPM_Nightly",
-    "focus_SPM_Beta",
-    "SPM_Nightly_Beta_Only",
-    "SPM_Deploy_Prod_Beta",
-    "SPM_Deploy_Beta_Only",
-    "focus_release"
+    "focus_SPM_Nightly"
 }
 
 def fetch_latest_version(step_id):
@@ -69,21 +64,24 @@ def update_bitrise_yaml():
     updated_lines = []
     updated_steps = []
     skip_workflow = False # Flag to track whether we are inside a skipped workflow
+    inside_steps = False # Track if we have reached 'steps:' in a workflow
 
     for line in content:
         # Detect if a new workflow starts
         workflow_match = re.match(r"^\s*([a-zA-Z0-9\-_]+):\s*$", line)
         if workflow_match:
             workflow_name = workflow_match.group(1)
-            if workflow_name in SKIPPED_WORKFLOWS:
+            skip_workflow = workflow_name in SKIPPED_WORKFLOWS
+            inside_steps = False  # Reset when a new workflow starts
+
+            if skip_workflow:
                 print(f"Skipping entire workflow: {workflow_name}")
-                skip_workflow = True  # Start skipping lines
-            else:
-                skip_workflow = False  # Reset skip when new workflow starts
-                
-        # If inside a skipped workflow, do NOT modify anything
-        if skip_workflow:
+
+        # If inside a skipped workflow, wait until `steps:` appears before stopping tracking
+        if skip_workflow and not inside_steps:
             updated_lines.append(line)
+            if re.match(r"^\s*steps:\s*$", line):  # Detect `steps:`
+                inside_steps = True
             continue
 
         # Match step lines and update if necessary
