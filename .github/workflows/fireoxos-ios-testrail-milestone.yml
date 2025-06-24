@@ -1,0 +1,18 @@
+name: On New Release
+
+on:
+  release:
+    types: [published]  # Trigger only when a release is published
+
+jobs:
+  handle-new-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Print Release Info
+        run: |
+          echo "New release published!"
+          echo "Tag: ${{ github.event.release.tag_name }}"
+          echo "Release Name: ${{ github.event.release.name }}"
+          echo "Body: ${{ github.event.release.body }}"
+          echo "Published at: ${{ github.event.release.published_at }}"
