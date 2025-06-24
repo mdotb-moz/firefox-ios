@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/
 
-import Common
 import Shared
 import Storage
 import XCTest
@@ -10,16 +9,19 @@ import XCTest
 @testable import Client
 
 final class TopSitesManagerTests: XCTestCase {
-    private var profile: MockProfile?
+    private var profile: MockProfile!
     private var dispatchQueue: MockDispatchQueue?
+    private var mockNotificationCenter: MockNotificationCenter?
     override func setUp() {
         super.setUp()
         profile = MockProfile()
         dispatchQueue = MockDispatchQueue()
-        LegacyFeatureFlagsManager.shared.initializeDeveloperFeatures(with: MockProfile())
+        mockNotificationCenter = MockNotificationCenter()
+        LegacyFeatureFlagsManager.shared.initializeDeveloperFeatures(with: profile)
     }
 
     override func tearDown() {
+        mockNotificationCenter = nil
         dispatchQueue = nil
         profile = nil
         super.tearDown()
@@ -175,7 +177,7 @@ final class TopSitesManagerTests: XCTestCase {
     }
 
     func test_recalculateTopSites_shouldNotShowSponsoredSites_returnNoSponsoredSites() throws {
-        profile?.prefs.setBool(false, forKey: PrefsKeys.UserFeatureFlagPrefs.SponsoredShortcuts)
+        profile?.prefs.setBool(false, forKey: PrefsKeys.FeatureFlags.SponsoredShortcuts)
 
         let subject = try createSubject()
 
@@ -327,6 +329,7 @@ final class TopSitesManagerTests: XCTestCase {
     func test_searchEngine_sponsoredSite_getsRemoved() throws {
         let searchEngine = OpenSearchEngine(engineID: "Firefox",
                                             shortName: "Firefox",
+                                            telemetrySuffix: nil,
                                             image: UIImage(),
                                             searchTemplate: "https://firefox.com/find?q={searchTerm}",
                                             suggestTemplate: nil,
@@ -390,6 +393,60 @@ final class TopSitesManagerTests: XCTestCase {
         XCTAssertEqual(mockPinnedSites.addPinnedTopSiteCalledCount, 1)
     }
 
+    func test_sponsoredShorcutsFlagEnabled_withoutUserPref_returnsSponsoredSites() throws {
+        setupNimbusHNTSponsoredShortcutsTesting(isEnabled: true)
+
+        let subject = try createSubject()
+
+        let topSites = subject.recalculateTopSites(
+            otherSites: [],
+            sponsoredSites: createSponsoredSites()
+        )
+
+        XCTAssertEqual(topSites.count, 2)
+    }
+
+    func test_sponsoredShorcutsFlagDisabled_withoutUserPref_returnsNoSponsoredSites() throws {
+        setupNimbusHNTSponsoredShortcutsTesting(isEnabled: false)
+
+        let subject = try createSubject()
+
+        let topSites = subject.recalculateTopSites(
+            otherSites: [],
+            sponsoredSites: createSponsoredSites()
+        )
+
+        XCTAssertEqual(topSites.count, 0)
+    }
+
+    func test_sponsoredShorcutsFlagEnabled_withUserPref_returnsNoSponsoredSites() throws {
+        profile?.prefs.setBool(false, forKey: PrefsKeys.FeatureFlags.SponsoredShortcuts)
+        setupNimbusHNTSponsoredShortcutsTesting(isEnabled: true)
+
+        let subject = try createSubject()
+
+        let topSites = subject.recalculateTopSites(
+            otherSites: [],
+            sponsoredSites: createSponsoredSites()
+        )
+
+        XCTAssertEqual(topSites.count, 0)
+    }
+
+    func test_sponsoredShorcutsFlagDisabled_withUserPref_returnsSponsoredSites() throws {
+        profile?.prefs.setBool(true, forKey: PrefsKeys.FeatureFlags.SponsoredShortcuts)
+        setupNimbusHNTSponsoredShortcutsTesting(isEnabled: false)
+
+        let subject = try createSubject()
+
+        let topSites = subject.recalculateTopSites(
+            otherSites: [],
+            sponsoredSites: createSponsoredSites()
+        )
+
+        XCTAssertEqual(topSites.count, 2)
+    }
+
     private func createSubject(
         injectedProfile: Profile? = nil,
         googleTopSiteManager: GoogleTopSiteManagerProvider = MockGoogleTopSiteManager(mockSiteData: nil),
@@ -415,6 +472,7 @@ final class TopSitesManagerTests: XCTestCase {
             topSiteHistoryManager: topSiteHistoryManager,
             searchEnginesManager: searchEngineManager,
             dispatchQueue: mockQueue,
+            notification: try XCTUnwrap(mockNotificationCenter),
             maxTopSites: maxCount
         )
         trackForMemoryLeaks(subject, file: file, line: line)
@@ -450,6 +508,14 @@ final class TopSitesManagerTests: XCTestCase {
     private func setupNimbusUnifiedAdsTesting(isEnabled: Bool) {
         FxNimbus.shared.features.unifiedAds.with { _, _ in
             return UnifiedAds(enabled: isEnabled)
+        }
+    }
+
+    private func setupNimbusHNTSponsoredShortcutsTesting(isEnabled: Bool) {
+        FxNimbus.shared.features.hntSponsoredShortcutsFeature.with { _, _ in
+            return HntSponsoredShortcutsFeature(
+                enabled: isEnabled
+            )
         }
     }
 }

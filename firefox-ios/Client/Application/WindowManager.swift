@@ -9,11 +9,8 @@ import TabDataStore
 import WidgetKit
 
 /// Defines various actions in the app which are performed for all open iPad
-/// windows. These can be routed through the WindowManager 
+/// windows. These can be routed through the WindowManager
 enum MultiWindowAction {
-    /// Signals that we should store tabs (for all windows) on the default Profile.
-    case storeTabs
-
     /// Signals that we should save Simple Tabs for all windows (used by our widgets).
     case saveSimpleTabs
 
@@ -60,7 +57,7 @@ protocol WindowManager {
 
     /// Signals the WindowManager that a window event has occurred. Window events
     /// are communicated to any interested Coordinators for _all_ windows, but
-    /// any one event is always associated with one window in specific. 
+    /// any one event is always associated with one window in specific.
     /// - Parameter event: the event that occurred and any associated metadata.
     /// - Parameter windowUUID: the UUID of the window triggering the event.
     func postWindowEvent(event: WindowEvent, windowUUID: WindowUUID)
@@ -81,7 +78,7 @@ struct AppWindowInfo {
     weak var sceneCoordinator: SceneCoordinator?
 }
 
-final class WindowManagerImplementation: WindowManager, WindowTabsSyncCoordinatorDelegate {
+final class WindowManagerImplementation: WindowManager {
     enum WindowPrefKeys {
         static let windowOrdering = "windowOrdering"
     }
@@ -97,7 +94,6 @@ final class WindowManagerImplementation: WindowManager, WindowTabsSyncCoordinato
     private let logger: Logger
     private let tabDataStore: TabDataStore
     private let defaults: UserDefaultsInterface
-    private let tabSyncCoordinator = WindowTabsSyncCoordinator()
     private let widgetSimpleTabsCoordinator = WindowSimpleTabsCoordinator()
 
     // Ordered set of UUIDs which determines the order that windows are re-opened on iPad
@@ -122,7 +118,6 @@ final class WindowManagerImplementation: WindowManager, WindowTabsSyncCoordinato
         self.tabDataStore = tabDataStore ?? DefaultTabDataStore(logger: logger, fileManager: DefaultTabFileManager())
         self.logger = logger
         self.defaults = userDefaults
-        tabSyncCoordinator.delegate = self
     }
 
     // MARK: - Public API
@@ -261,8 +256,6 @@ final class WindowManagerImplementation: WindowManager, WindowTabsSyncCoordinato
                     .childCoordinators.first(where: { $0 is BrowserCoordinator }) as? BrowserCoordinator else { return }
                 browserCoordinator.browserViewController.closeAllPrivateTabs()
             }
-        case .storeTabs:
-            storeTabs()
         case .saveSimpleTabs:
             saveSimpleTabs()
         }
@@ -270,16 +263,6 @@ final class WindowManagerImplementation: WindowManager, WindowTabsSyncCoordinato
 
     func window(for tab: TabUUID) -> WindowUUID? {
         return allWindowTabManagers().first(where: { $0.tabs.contains(where: { $0.tabUUID == tab }) })?.windowUUID
-    }
-
-    // MARK: - WindowTabSyncCoordinatorDelegate
-
-    private func storeTabs() {
-        tabSyncCoordinator.syncTabsToProfile()
-    }
-
-    func tabManagers() -> [TabManager] {
-        return allWindowTabManagers()
     }
 
     // MARK: - Internal Utilities

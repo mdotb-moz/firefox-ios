@@ -18,15 +18,11 @@ struct PocketState: StateType, Equatable {
     let pocketData: [PocketStoryConfiguration]
     let shouldShowSection: Bool
 
-    let sectionHeaderState = SectionHeaderState(
+    let sectionHeaderState = SectionHeaderConfiguration(
         title: .FirefoxHomepage.Pocket.SectionTitle,
         a11yIdentifier: AccessibilityIdentifiers.FirefoxHomepage.SectionTitles.pocket
     )
 
-    let pocketDiscoverItem = PocketDiscoverConfiguration(
-        title: .FirefoxHomepage.Pocket.DiscoverMore,
-        url: PocketProvider.MoreStoriesURL
-    )
     let footerURL = SupportUtils.URLForPocketLearnMore
 
     init(profile: Profile = AppContainer.shared.resolve(), windowUUID: WindowUUID) {

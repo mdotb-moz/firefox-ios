@@ -150,7 +150,7 @@ class IntroViewController: UIViewController,
         let action = ScreenAction(windowUUID: windowUUID,
                                   actionType: ScreenActionType.showScreen,
                                   screen: .onboardingViewController)
-        store.dispatch(action)
+        store.dispatchLegacy(action)
         let uuid = windowUUID
         store.subscribe(self, transform: {
             $0.select({ appState in
@@ -164,7 +164,7 @@ class IntroViewController: UIViewController,
         let action = ScreenAction(windowUUID: windowUUID,
                                   actionType: ScreenActionType.closeScreen,
                                   screen: .onboardingViewController)
-        store.dispatch(action)
+        store.dispatchLegacy(action)
     }
 
     func newState(state: OnboardingViewControllerState) {
@@ -182,6 +182,7 @@ class IntroViewController: UIViewController,
     func closeOnboarding() {
         guard let viewModel = viewModel as? IntroViewModel else { return }
         viewModel.saveHasSeenOnboarding()
+        viewModel.saveSearchBarPosition()
         didFinishFlow?()
         viewModel.telemetryUtility.sendDismissOnboardingTelemetry(
             from: viewModel.availableCards[pageControl.currentPage].viewModel.name)
@@ -327,6 +328,10 @@ extension IntroViewController: OnboardingCardDelegate {
             registerForNotification()
             DefaultApplicationHelper().openSettings()
         case .openInstructionsPopup:
+            /// Setting default browser card action opens an instruction pop up instead of
+            /// setting a default browser action. TBD if the above code even still fires.
+            introViewModel.chosenOptions.insert(.setAsDefaultBrowser)
+            introViewModel.updateOnboardingUserActivationEvent()
             presentDefaultBrowserPopup(
                 windowUUID: windowUUID,
                 from: cardName,
@@ -356,19 +361,23 @@ extension IntroViewController: OnboardingCardDelegate {
             let action = ThemeSettingsViewAction(manualThemeType: .dark,
                                                  windowUUID: windowUUID,
                                                  actionType: ThemeSettingsViewActionType.switchManualTheme)
-            store.dispatch(action)
+            store.dispatchLegacy(action)
         case .themeLight:
             turnSystemTheme(on: false)
             let action = ThemeSettingsViewAction(manualThemeType: .light,
                                                  windowUUID: windowUUID,
                                                  actionType: ThemeSettingsViewActionType.switchManualTheme)
-            store.dispatch(action)
+            store.dispatchLegacy(action)
         case .themeSystemDefault:
             turnSystemTheme(on: true)
         case .toolbarBottom:
             featureFlags.set(feature: .searchBarPosition, to: SearchBarPosition.bottom)
+            let notificationObject = [PrefsKeys.FeatureFlags.SearchBarPosition: SearchBarPosition.bottom]
+            notificationCenter.post(name: .SearchBarPositionDidChange, withObject: notificationObject)
         case .toolbarTop:
             featureFlags.set(feature: .searchBarPosition, to: SearchBarPosition.top)
+            let notificationObject = [PrefsKeys.FeatureFlags.SearchBarPosition: SearchBarPosition.top]
+            notificationCenter.post(name: .SearchBarPositionDidChange, withObject: notificationObject)
         }
         viewModel.telemetryUtility.sendMultipleChoiceButtonActionTelemetry(
             from: cardName,
@@ -380,7 +389,7 @@ extension IntroViewController: OnboardingCardDelegate {
         let action = ThemeSettingsViewAction(useSystemAppearance: state,
                                              windowUUID: windowUUID,
                                              actionType: ThemeSettingsViewActionType.toggleUseSystemAppearance)
-        store.dispatch(action)
+        store.dispatchLegacy(action)
     }
 
     func sendCardViewTelemetry(from cardName: String) {

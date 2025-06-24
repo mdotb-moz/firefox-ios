@@ -7,6 +7,11 @@ import Shared
 import UIKit
 import ComponentLibrary
 
+struct Links {
+    static let termsOfService = "https://www.mozilla.org/about/legal/terms/firefox/"
+    static let privacyNotice = "https://www.mozilla.org/privacy/firefox/"
+}
+
 class TermsOfServiceViewController: UIViewController, Themeable {
 	enum LinkType: Int {
 		case termsOfService
@@ -20,11 +25,6 @@ class TermsOfServiceViewController: UIViewController, Themeable {
         static let margin: CGFloat = 20
         static let agreementContentSpacing: CGFloat = 15
         static let distanceBetweenViews = 2 * margin
-    }
-
-    struct Links {
-        static let termsOfService = "https://www.mozilla.org/about/legal/terms/firefox/"
-        static let privacyNotice = "https://www.mozilla.org/privacy/firefox/"
     }
 
     // MARK: - Properties
@@ -65,8 +65,10 @@ class TermsOfServiceViewController: UIViewController, Themeable {
     }
 
     private lazy var confirmationButton: PrimaryRoundedButton = .build { button in
+        // Using .LoginsOnboardingContinueButtonTite until
+        // we have a new translation for .Onboarding.TermsOfService.AgreementButtonTitleV3
         let viewModel = PrimaryRoundedButtonViewModel(
-            title: .Onboarding.TermsOfService.AgreementButtonTitleV2,
+            title: .LoginsOnboardingContinueButtonTitle,
             a11yIdentifier: AccessibilityIdentifiers.TermsOfService.agreeAndContinueButton)
         button.configure(viewModel: viewModel)
         button.addTarget(self, action: #selector(self.acceptTermsOfService), for: .touchUpInside)

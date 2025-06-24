@@ -4,7 +4,6 @@
 
 import Foundation
 import Shared
-import Storage
 
 protocol PocketStoriesProviding {
     typealias StoryResult = Swift.Result<[PocketFeedStory], Error>
@@ -27,14 +26,6 @@ class PocketProvider: PocketStoriesProviding, FeatureFlaggable, URLCaching {
     private var prefs: Prefs
 
     static let GlobalFeed = "https://getpocket.cdn.mozilla.net/v3/firefox/global-recs"
-    static let MoreStoriesURL = {
-        switch Locale.current.identifier {
-        case "de_DE":
-            return URL(string: "https://getpocket.com/de/explore?src=ff_ios")!
-        default:
-            return URL(string: "https://getpocket.com/explore?src=ff_ios&cdn=0")!
-        }
-    }()
 
     // Allow endPoint to be overridden for testing
     init(endPoint: String = PocketProvider.GlobalFeed,
@@ -128,10 +119,7 @@ class PocketProvider: PocketStoriesProviding, FeatureFlaggable, URLCaching {
             params.append(URLQueryItem(name: "consumer_key", value: pocketKey))
         }
 
-        guard let feedURL = URL(
-            string: pocketGlobalFeed,
-            invalidCharacters: false
-        )?.withQueryParams(params) else { return nil }
+        guard let feedURL = URL(string: pocketGlobalFeed)?.withQueryParams(params) else { return nil }
 
         return URLRequest(url: feedURL, cachePolicy: .reloadIgnoringCacheData, timeoutInterval: 5)
     }

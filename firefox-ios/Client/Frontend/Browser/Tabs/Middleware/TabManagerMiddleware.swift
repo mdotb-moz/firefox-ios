@@ -4,24 +4,40 @@
 
 import Common
 import Redux
-import TabDataStore
 import Shared
 import Storage
+import Account
+import SiteImageView
 
 import enum MozillaAppServices.BookmarkRoots
 
-class TabManagerMiddleware: BookmarksRefactorFeatureFlagProvider {
+class TabManagerMiddleware: BookmarksRefactorFeatureFlagProvider,
+                            FeatureFlaggable {
     private let profile: Profile
     private let logger: Logger
+    private let windowManager: WindowManager
     private let inactiveTabTelemetry = InactiveTabsTelemetry()
     private let bookmarksSaver: BookmarksSaver
+    private let toastTelemetry: ToastTelemetry
+    private let tabsPanelTelemetry: TabsPanelTelemetry
+
+    private var isTabTrayUIExperimentsEnabled: Bool {
+        return featureFlags.isFeatureEnabled(.tabTrayUIExperiments, checking: .buildOnly)
+        && UIDevice.current.userInterfaceIdiom != .pad
+    }
 
     init(profile: Profile = AppContainer.shared.resolve(),
          logger: Logger = DefaultLogger.shared,
-         bookmarksSaver: BookmarksSaver? = nil) {
+         windowManager: WindowManager = AppContainer.shared.resolve(),
+         bookmarksSaver: BookmarksSaver? = nil,
+         gleanWrapper: GleanWrapper = DefaultGleanWrapper()
+    ) {
         self.profile = profile
         self.logger = logger
+        self.windowManager = windowManager
         self.bookmarksSaver = bookmarksSaver ?? DefaultBookmarksSaver(profile: profile)
+        self.toastTelemetry = ToastTelemetry(gleanWrapper: gleanWrapper)
+        self.tabsPanelTelemetry = TabsPanelTelemetry(gleanWrapper: gleanWrapper, logger: logger)
     }
 
     lazy var tabsPanelProvider: Middleware<AppState> = { state, action in
@@ -35,9 +51,26 @@ class TabManagerMiddleware: BookmarksRefactorFeatureFlagProvider {
             self.resolveTabPanelViewActions(action: action, state: state)
         } else if let action = action as? MainMenuAction {
             self.resolveMainMenuActions(with: action, appState: state)
+        } else if let action = action as? ScreenshotAction {
+            self.resolveScreenshotActions(action: action, state: state)
         } else {
             self.resolveHomepageActions(with: action)
         }
+    }
+
+    private func resolveScreenshotActions(action: ScreenshotAction, state: AppState) {
+        guard let tabsState = state.screenState(TabsPanelState.self,
+                                                for: .tabsPanel,
+                                                window: action.windowUUID) else { return }
+        // TODO: FXIOS-12101 this should be removed once we figure out screenshots
+        guard windowManager.windows[action.windowUUID]?.tabManager != nil else {
+            logger.log("Tab manager does not exist for this window, bailing from taking a screenshot.", level: .fatal, category: .tabs, extra: ["windowUUID": "\(action.windowUUID)"])
+            return
+        }
+
+        let manager = tabManager(for: action.windowUUID)
+        manager.tabDidSetScreenshot(action.tab)
+        triggerRefresh(uuid: action.windowUUID, isPrivate: tabsState.isPrivateMode)
     }
 
     private func resolveTabPeekActions(action: TabPeekAction, state: AppState) {
@@ -92,10 +125,18 @@ class TabManagerMiddleware: BookmarksRefactorFeatureFlagProvider {
 
         case TabTrayActionType.changePanel:
             guard let panelType = action.panelType else { return }
-            changePanel(panelType, uuid: action.windowUUID)
+            changePanel(panelType, appState: state, uuid: action.windowUUID)
 
         case TabTrayActionType.closePrivateTabsSettingToggled:
             preserveTabs(uuid: action.windowUUID)
+
+        // FXIOS-11740 - This is relate to homepage actions, so if we want to break up this middleware
+        // then this action should go to the homepage specific middleware.
+        case TabTrayActionType.dismissTabTray, TabTrayActionType.modalSwipedToClose:
+            dispatchRecentlyAccessedTabs(action: action)
+        case TabTrayActionType.doneButtonTapped:
+            tabsPanelTelemetry.doneButtonTapped(mode: action.panelType?.modeForTelemetry ?? .normal)
+            dispatchRecentlyAccessedTabs(action: action)
         default:
             break
         }
@@ -113,7 +154,7 @@ class TabManagerMiddleware: BookmarksRefactorFeatureFlagProvider {
                                                   scrollBehavior: .scrollToSelectedTab(shouldAnimate: false),
                                                   windowUUID: action.windowUUID,
                                                   actionType: TabPanelMiddlewareActionType.didLoadTabPanel)
-            store.dispatch(action)
+            store.dispatchLegacy(action)
 
         case TabPanelViewActionType.tabPanelWillAppear:
             let isPrivate = action.panelType == .privateTabs
@@ -124,12 +165,14 @@ class TabManagerMiddleware: BookmarksRefactorFeatureFlagProvider {
             let action = TabPanelMiddlewareAction(tabDisplayModel: tabState,
                                                   windowUUID: action.windowUUID,
                                                   actionType: TabPanelMiddlewareActionType.willAppearTabPanel)
-            store.dispatch(action)
+            store.dispatchLegacy(action)
 
         case TabPanelViewActionType.addNewTab:
             let isPrivateMode = action.panelType == .privateTabs
+            tabsPanelTelemetry.newTabButtonTapped(mode: action.panelType?.modeForTelemetry ?? .normal)
+            UserConversionMetrics().didOpenNewTab()
             addNewTab(with: action.urlRequest, isPrivate: isPrivateMode, showOverlay: true, for: action.windowUUID)
-
+            dispatchRecentlyAccessedTabs(action: action)
         case TabPanelViewActionType.moveTab:
             guard let moveTabData = action.moveTabData else { return }
             moveTab(state: state, moveTabData: moveTabData, uuid: action.windowUUID)
@@ -143,15 +186,31 @@ class TabManagerMiddleware: BookmarksRefactorFeatureFlagProvider {
         case TabPanelViewActionType.undoClose:
             undoCloseTab(state: state, uuid: action.windowUUID)
 
+        case TabPanelViewActionType.cancelCloseAllTabs:
+            tabsPanelTelemetry.closeAllTabsSheetOptionSelected(
+                option: .cancel,
+                mode: (action.panelType ?? .tabs).modeForTelemetry
+            )
+
         case TabPanelViewActionType.confirmCloseAllTabs:
             closeAllTabs(state: state, uuid: action.windowUUID)
+
+        case TabPanelViewActionType.deleteTabsOlderThan:
+            guard let period = action.deleteTabPeriod else { return }
+            deleteNormalTabsOlderThan(period: period, uuid: action.windowUUID)
 
         case TabPanelViewActionType.undoCloseAllTabs:
             undoCloseAllTabs(uuid: action.windowUUID)
 
         case TabPanelViewActionType.selectTab:
             guard let tabUUID = action.tabUUID else { return }
-            selectTab(for: tabUUID, uuid: action.windowUUID, isInactiveTab: action.isInactiveTab ?? false)
+            selectTab(
+                for: tabUUID,
+                uuid: action.windowUUID,
+                isInactiveTab: action.isInactiveTab ?? false,
+                panelType: action.panelType ?? .tabs,
+                selectedTabIndex: action.selectedTabIndex
+            )
 
         case TabPanelViewActionType.closeAllInactiveTabs:
             closeAllInactiveTabs(state: state, uuid: action.windowUUID)
@@ -194,7 +253,7 @@ class TabManagerMiddleware: BookmarksRefactorFeatureFlagProvider {
         let action = TabTrayAction(tabTrayModel: tabTrayModel,
                                    windowUUID: windowUUID,
                                    actionType: TabTrayActionType.didLoadTabTray)
-        store.dispatch(action)
+        store.dispatchLegacy(action)
     }
 
     private func normalTabsCountText(for windowUUID: WindowUUID) -> String {
@@ -224,7 +283,7 @@ class TabManagerMiddleware: BookmarksRefactorFeatureFlagProvider {
 
     /// Gets initial state for TabTrayModel includes panelType, if is on Private mode,
     /// normalTabsCountText and if syncAccount is enabled
-    /// 
+    ///
     /// - Parameter panelType: The selected panelType
     /// - Returns: Initial state of TabTrayModel
     private func getTabTrayModel(for panelType: TabTrayPanelType, window: WindowUUID) -> TabTrayModel {
@@ -310,16 +369,18 @@ class TabManagerMiddleware: BookmarksRefactorFeatureFlagProvider {
         let refreshAction = TabPanelMiddlewareAction(tabDisplayModel: model,
                                                      windowUUID: uuid,
                                                      actionType: TabPanelMiddlewareActionType.refreshTabs)
-        store.dispatch(refreshAction)
+        store.dispatchLegacy(refreshAction)
 
         let dismissAction = TabTrayAction(windowUUID: uuid,
                                           actionType: TabTrayActionType.dismissTabTray)
-        store.dispatch(dismissAction)
+        store.dispatchLegacy(dismissAction)
 
-        let overlayAction = GeneralBrowserAction(showOverlay: showOverlay,
-                                                 windowUUID: uuid,
-                                                 actionType: GeneralBrowserActionType.showOverlay)
-        store.dispatch(overlayAction)
+        if !isTabTrayUIExperimentsEnabled {
+            let overlayAction = GeneralBrowserAction(showOverlay: showOverlay,
+                                                     windowUUID: uuid,
+                                                     actionType: GeneralBrowserActionType.showOverlay)
+            store.dispatchLegacy(overlayAction)
+        }
     }
 
     /// Move tab on `TabManager` array to support drag and drop
@@ -343,7 +404,7 @@ class TabManagerMiddleware: BookmarksRefactorFeatureFlagProvider {
         let action = TabPanelMiddlewareAction(tabDisplayModel: model,
                                               windowUUID: uuid,
                                               actionType: TabPanelMiddlewareActionType.refreshTabs)
-        store.dispatch(action)
+        store.dispatchLegacy(action)
     }
 
     /// Async close single tab. If is the last tab the Tab Tray is dismissed and undo
@@ -354,6 +415,7 @@ class TabManagerMiddleware: BookmarksRefactorFeatureFlagProvider {
     /// - Returns: If is the last tab to be closed used to trigger dismissTabTray action
     @MainActor
     private func closeTab(with tabUUID: TabUUID, uuid: WindowUUID, isPrivate: Bool) async -> Bool {
+        tabsPanelTelemetry.tabClosed(mode: isPrivate ? .private : .normal)
         let tabManager = tabManager(for: uuid)
         // In non-private mode, if:
         //      A) the last normal active tab is closed, or
@@ -369,34 +431,39 @@ class TabManagerMiddleware: BookmarksRefactorFeatureFlagProvider {
     /// Close tab and trigger refresh
     /// - Parameter tabUUID: UUID of the tab to be closed/removed
     private func closeTabFromTabPanel(with tabUUID: TabUUID, uuid: WindowUUID, isPrivate: Bool) {
-        Task {
+        Task { @MainActor in
             let shouldDismiss = await self.closeTab(with: tabUUID, uuid: uuid, isPrivate: isPrivate)
-            await self.triggerRefresh(uuid: uuid, isPrivate: isPrivate)
+            triggerRefresh(uuid: uuid, isPrivate: isPrivate)
 
             if isPrivate && tabManager(for: uuid).privateTabs.isEmpty {
                 let didLoadAction = TabPanelViewAction(panelType: isPrivate ? .privateTabs : .tabs,
                                                        windowUUID: uuid,
                                                        actionType: TabPanelViewActionType.tabPanelDidLoad)
-                store.dispatch(didLoadAction)
+                store.dispatchLegacy(didLoadAction)
 
-                let toastAction = TabPanelMiddlewareAction(toastType: .closedSingleTab,
-                                                           windowUUID: uuid,
-                                                           actionType: TabPanelMiddlewareActionType.showToast)
-                store.dispatch(toastAction)
+                if !isTabTrayUIExperimentsEnabled {
+                    let toastAction = TabPanelMiddlewareAction(toastType: .closedSingleTab,
+                                                               windowUUID: uuid,
+                                                               actionType: TabPanelMiddlewareActionType.showToast)
+                    store.dispatchLegacy(toastAction)
+                }
             } else if shouldDismiss {
                 let dismissAction = TabTrayAction(windowUUID: uuid,
                                                   actionType: TabTrayActionType.dismissTabTray)
-                store.dispatch(dismissAction)
+                store.dispatchLegacy(dismissAction)
 
-                let toastAction = GeneralBrowserAction(toastType: .closedSingleTab,
-                                                       windowUUID: uuid,
-                                                       actionType: GeneralBrowserActionType.showToast)
-                store.dispatch(toastAction)
-            } else {
+                if !isTabTrayUIExperimentsEnabled {
+                    let toastAction = GeneralBrowserAction(toastType: .closedSingleTab,
+                                                           windowUUID: uuid,
+                                                           actionType: GeneralBrowserActionType.showToast)
+                    store.dispatchLegacy(toastAction)
+                }
+                addNewTabIfPrivate(uuid: uuid)
+            } else if !isTabTrayUIExperimentsEnabled {
                 let toastAction = TabPanelMiddlewareAction(toastType: .closedSingleTab,
                                                            windowUUID: uuid,
                                                            actionType: TabPanelMiddlewareActionType.showToast)
-                store.dispatch(toastAction)
+                store.dispatchLegacy(toastAction)
             }
         }
     }
@@ -413,10 +480,13 @@ class TabManagerMiddleware: BookmarksRefactorFeatureFlagProvider {
                                                                              withUserData: userData,
                                                                              toApplication: .shared)
 
-        let toastAction = TabPanelMiddlewareAction(toastType: .addBookmark,
-                                                   windowUUID: uuid,
-                                                   actionType: TabPanelMiddlewareActionType.showToast)
-        store.dispatch(toastAction)
+        if !isTabTrayUIExperimentsEnabled {
+            // The Tab Tray uses a "SimpleToast", so the urlString will go unused
+            let toastAction = TabPanelMiddlewareAction(toastType: .addBookmark(urlString: shareItem.url),
+                                                       windowUUID: uuid,
+                                                       actionType: TabPanelMiddlewareActionType.showToast)
+            store.dispatchLegacy(toastAction)
+        }
 
         TelemetryWrapper.recordEvent(category: .action,
                                      method: .add,
@@ -425,17 +495,17 @@ class TabManagerMiddleware: BookmarksRefactorFeatureFlagProvider {
     }
 
     /// Trigger refreshTabs action after a change in `TabManager`
-    @MainActor
     private func triggerRefresh(uuid: WindowUUID, isPrivate: Bool) {
         let model = getTabsDisplayModel(for: isPrivate, uuid: uuid)
         let action = TabPanelMiddlewareAction(tabDisplayModel: model,
                                               windowUUID: uuid,
                                               actionType: TabPanelMiddlewareActionType.refreshTabs)
-        store.dispatch(action)
+        store.dispatchLegacy(action)
     }
 
     /// Handles undoing the close tab action, gets the backup tab from `TabManager`
     private func undoCloseTab(state: AppState, uuid: WindowUUID) {
+        toastTelemetry.undoClosedSingleTab()
         let tabManager = tabManager(for: uuid)
         guard let tabsState = state.screenState(TabsPanelState.self, for: .tabsPanel, window: uuid),
               tabManager.backupCloseTab != nil
@@ -447,7 +517,7 @@ class TabManagerMiddleware: BookmarksRefactorFeatureFlagProvider {
         let refreshAction = TabPanelMiddlewareAction(tabDisplayModel: model,
                                                      windowUUID: uuid,
                                                      actionType: TabPanelMiddlewareActionType.refreshTabs)
-        store.dispatch(refreshAction)
+        store.dispatchLegacy(refreshAction)
 
         // Scroll to the restored tab so the user knows it was restored, especially if it was restored off screen
         // (e.g. restoring the tab in the last row, first column)
@@ -458,12 +528,14 @@ class TabManagerMiddleware: BookmarksRefactorFeatureFlagProvider {
                                                     scrollBehavior: scrollBehavior,
                                                     windowUUID: uuid,
                                                     actionType: TabPanelMiddlewareActionType.scrollToTab)
-        store.dispatch(scrollAction)
+        store.dispatchLegacy(scrollAction)
     }
 
     private func closeAllTabs(state: AppState, uuid: WindowUUID) {
         let tabManager = tabManager(for: uuid)
         guard let tabsState = state.screenState(TabsPanelState.self, for: .tabsPanel, window: uuid) else { return }
+
+        tabsPanelTelemetry.closeAllTabsSheetOptionSelected(option: .all, mode: tabsState.isPrivateMode ? .private : .normal)
         Task {
             let normalCount = tabManager.normalTabs.count
             let privateCount = tabManager.privateTabs.count
@@ -474,18 +546,21 @@ class TabManagerMiddleware: BookmarksRefactorFeatureFlagProvider {
                 let action = TabPanelMiddlewareAction(tabDisplayModel: model,
                                                       windowUUID: uuid,
                                                       actionType: TabPanelMiddlewareActionType.refreshTabs)
-                store.dispatch(action)
+                store.dispatchLegacy(action)
 
-                if tabsState.isPrivateMode {
+                if tabsState.isPrivateMode && !isTabTrayUIExperimentsEnabled {
                     let action = TabPanelMiddlewareAction(toastType: .closedAllTabs(count: privateCount),
                                                           windowUUID: uuid,
                                                           actionType: TabPanelMiddlewareActionType.showToast)
-                    store.dispatch(action)
+                    store.dispatchLegacy(action)
                 } else {
-                    let toastAction = GeneralBrowserAction(toastType: .closedAllTabs(count: normalCount),
-                                                           windowUUID: uuid,
-                                                           actionType: GeneralBrowserActionType.showToast)
-                    store.dispatch(toastAction)
+                    if !isTabTrayUIExperimentsEnabled {
+                        let toastAction = GeneralBrowserAction(toastType: .closedAllTabs(count: normalCount),
+                                                               windowUUID: uuid,
+                                                               actionType: GeneralBrowserActionType.showToast)
+                        store.dispatchLegacy(toastAction)
+                    }
+                    addNewTabIfPrivate(uuid: uuid)
                 }
             }
         }
@@ -493,11 +568,33 @@ class TabManagerMiddleware: BookmarksRefactorFeatureFlagProvider {
         if !tabsState.isPrivateMode {
             let dismissAction = TabTrayAction(windowUUID: uuid,
                                               actionType: TabTrayActionType.dismissTabTray)
-            store.dispatch(dismissAction)
+            store.dispatchLegacy(dismissAction)
+        }
+    }
+
+    private func deleteNormalTabsOlderThan(period: TabsDeletionPeriod, uuid: WindowUUID) {
+        tabsPanelTelemetry.deleteNormalTabsSheetOptionSelected(period: period)
+        let tabManager = tabManager(for: uuid)
+        tabManager.removeNormalTabsOlderThan(period: period, currentDate: .now)
+
+        // We are not closing the tab tray, so we need to refresh the tabs on screen
+        let model = getTabsDisplayModel(for: false, uuid: uuid)
+        let refreshAction = TabPanelMiddlewareAction(tabDisplayModel: model,
+                                                     windowUUID: uuid,
+                                                     actionType: TabPanelMiddlewareActionType.refreshTabs)
+        store.dispatchLegacy(refreshAction)
+    }
+
+    /// Add a new tab when privateMode is selected and all or last normal tabs/tab are/is going to be closed
+    private func addNewTabIfPrivate(uuid: WindowUUID) {
+        let tabManager = tabManager(for: uuid)
+        if let selectedTab = tabManager.selectedTab, selectedTab.isPrivate {
+            tabManager.addTab(nil, isPrivate: false)
         }
     }
 
     private func undoCloseAllTabs(uuid: WindowUUID) {
+        toastTelemetry.undoClosedAllTabs()
         let tabManager = tabManager(for: uuid)
         tabManager.undoCloseAllTabs()
 
@@ -506,14 +603,14 @@ class TabManagerMiddleware: BookmarksRefactorFeatureFlagProvider {
         let refreshAction = TabPanelMiddlewareAction(tabDisplayModel: model,
                                                      windowUUID: uuid,
                                                      actionType: TabPanelMiddlewareActionType.refreshTabs)
-        store.dispatch(refreshAction)
+        store.dispatchLegacy(refreshAction)
 
         // Scroll to the selected tab if all closed tabs are restored
         let scrollAction = TabPanelMiddlewareAction(tabDisplayModel: model,
                                                     scrollBehavior: .scrollToSelectedTab(shouldAnimate: true),
                                                     windowUUID: uuid,
                                                     actionType: TabPanelMiddlewareActionType.scrollToTab)
-        store.dispatch(scrollAction)
+        store.dispatchLegacy(scrollAction)
     }
 
     // MARK: - Inactive tabs helper
@@ -529,7 +626,7 @@ class TabManagerMiddleware: BookmarksRefactorFeatureFlagProvider {
             let refreshAction = TabPanelMiddlewareAction(inactiveTabModels: [InactiveTabsModel](),
                                                          windowUUID: uuid,
                                                          actionType: TabPanelMiddlewareActionType.refreshInactiveTabs)
-            store.dispatch(refreshAction)
+            store.dispatchLegacy(refreshAction)
 
             // Refresh the active tabs panel. Can only happen if the user is in normal browsering mode (not private).
             // Related: FXIOS-10010, FXIOS-9954, FXIOS-9999
@@ -537,13 +634,13 @@ class TabManagerMiddleware: BookmarksRefactorFeatureFlagProvider {
             let refreshActiveTabsPanelAction = TabPanelMiddlewareAction(tabDisplayModel: model,
                                                                         windowUUID: uuid,
                                                                         actionType: TabPanelMiddlewareActionType.refreshTabs)
-            store.dispatch(refreshActiveTabsPanelAction)
+            store.dispatchLegacy(refreshActiveTabsPanelAction)
 
             let inactiveTabsCount = tabsState.inactiveTabs.count
             let toastAction = TabPanelMiddlewareAction(toastType: .closedAllInactiveTabs(count: inactiveTabsCount),
                                                        windowUUID: uuid,
                                                        actionType: TabPanelMiddlewareActionType.showToast)
-            store.dispatch(toastAction)
+            store.dispatchLegacy(toastAction)
         }
     }
 
@@ -556,7 +653,7 @@ class TabManagerMiddleware: BookmarksRefactorFeatureFlagProvider {
             let refreshAction = TabPanelMiddlewareAction(inactiveTabModels: inactiveTabs,
                                                          windowUUID: uuid,
                                                          actionType: TabPanelMiddlewareActionType.refreshInactiveTabs)
-            store.dispatch(refreshAction)
+            store.dispatchLegacy(refreshAction)
         }
     }
 
@@ -578,12 +675,12 @@ class TabManagerMiddleware: BookmarksRefactorFeatureFlagProvider {
             let refreshAction = TabPanelMiddlewareAction(inactiveTabModels: inactiveTabs,
                                                          windowUUID: uuid,
                                                          actionType: TabPanelMiddlewareActionType.refreshInactiveTabs)
-            store.dispatch(refreshAction)
+            store.dispatchLegacy(refreshAction)
 
             let toastAction = TabPanelMiddlewareAction(toastType: .closedSingleInactiveTab,
                                                        windowUUID: uuid,
                                                        actionType: TabPanelMiddlewareActionType.showToast)
-            store.dispatch(toastAction)
+            store.dispatchLegacy(toastAction)
         }
     }
 
@@ -596,22 +693,30 @@ class TabManagerMiddleware: BookmarksRefactorFeatureFlagProvider {
         let refreshAction = TabPanelMiddlewareAction(inactiveTabModels: inactiveTabs,
                                                      windowUUID: uuid,
                                                      actionType: TabPanelMiddlewareActionType.refreshInactiveTabs)
-        store.dispatch(refreshAction)
+        store.dispatchLegacy(refreshAction)
     }
 
     private func didTapLearnMoreAboutPrivate(with urlRequest: URLRequest, uuid: WindowUUID) {
         addNewTab(with: urlRequest, isPrivate: true, showOverlay: false, for: uuid)
     }
 
-    private func selectTab(for tabUUID: TabUUID, uuid: WindowUUID, isInactiveTab: Bool) {
+    private func selectTab(
+        for tabUUID: TabUUID,
+        uuid: WindowUUID,
+        isInactiveTab: Bool,
+        panelType: TabTrayPanelType,
+        selectedTabIndex: Int?
+    ) {
         let tabManager = tabManager(for: uuid)
         guard let tab = tabManager.getTabForUUID(uuid: tabUUID) else { return }
 
         tabManager.selectTab(tab)
 
+        tabsPanelTelemetry.tabSelected(at: selectedTabIndex, mode: panelType.modeForTelemetry)
+
         let action = TabTrayAction(windowUUID: uuid,
                                    actionType: TabTrayActionType.dismissTabTray)
-        store.dispatch(action)
+        store.dispatchLegacy(action)
 
         if isInactiveTab {
             inactiveTabTelemetry.tabOpened()
@@ -619,7 +724,6 @@ class TabManagerMiddleware: BookmarksRefactorFeatureFlagProvider {
     }
 
     private func tabManager(for uuid: WindowUUID) -> TabManager {
-        let windowManager: WindowManager = AppContainer.shared.resolve()
         guard uuid != .unavailable else {
             assertionFailure()
             logger.log("Unexpected or unavailable window UUID for requested TabManager.", level: .fatal, category: .tabs)
@@ -642,13 +746,14 @@ class TabManagerMiddleware: BookmarksRefactorFeatureFlagProvider {
             let browserProfile = self.profile as? BrowserProfile
             browserProfile?.tabs.getClientGUIDs { (result, error) in
                 let model = TabPeekModel(canTabBeSaved: canBeSaved,
+                                         canCopyURL: !(tab?.isFxHomeTab ?? false),
                                          isSyncEnabled: !(result?.isEmpty ?? true),
                                          screenshot: tab?.screenshot ?? UIImage(),
                                          accessiblityLabel: tab?.webView?.accessibilityLabel ?? "")
                 let action = TabPeekAction(tabPeekModel: model,
                                            windowUUID: uuid,
                                            actionType: TabPeekActionType.loadTabPeek)
-                store.dispatch(action)
+                store.dispatchLegacy(action)
             }
         }
     }
@@ -656,48 +761,21 @@ class TabManagerMiddleware: BookmarksRefactorFeatureFlagProvider {
     private func copyURL(tabID: TabUUID, uuid: WindowUUID) {
         let tabManager = tabManager(for: uuid)
         UIPasteboard.general.url = tabManager.getTabForUUID(uuid: tabID)?.canonicalURL
-        let toastAction = TabPanelMiddlewareAction(toastType: .copyURL,
-                                                   windowUUID: uuid,
-                                                   actionType: TabPanelMiddlewareActionType.showToast)
-        store.dispatch(toastAction)
     }
 
     private func tabPeekCloseTab(with tabID: TabUUID, uuid: WindowUUID, isPrivate: Bool) {
         closeTabFromTabPanel(with: tabID, uuid: uuid, isPrivate: isPrivate)
     }
 
-    private func changePanel(_ panel: TabTrayPanelType, uuid: WindowUUID) {
-        self.trackPanelChange(panel)
+    private func changePanel(_ panel: TabTrayPanelType, appState: AppState, uuid: WindowUUID) {
+        tabsPanelTelemetry.tabModeSelected(mode: panel.modeForTelemetry)
         let isPrivate = panel == TabTrayPanelType.privateTabs
         let tabState = self.getTabsDisplayModel(for: isPrivate, uuid: uuid)
         if panel != .syncedTabs {
             let action = TabPanelMiddlewareAction(tabDisplayModel: tabState,
                                                   windowUUID: uuid,
                                                   actionType: TabPanelMiddlewareActionType.didChangeTabPanel)
-            store.dispatch(action)
-        }
-    }
-
-    private func trackPanelChange(_ panel: TabTrayPanelType) {
-        switch panel {
-        case .tabs:
-            TelemetryWrapper.recordEvent(
-                category: .action,
-                method: .tap,
-                object: .privateBrowsingButton,
-                extras: ["is-private": false.description])
-        case .privateTabs:
-            TelemetryWrapper.recordEvent(
-                category: .action,
-                method: .tap,
-                object: .privateBrowsingButton,
-                extras: ["is-private": true.description])
-        case .syncedTabs:
-            TelemetryWrapper.recordEvent(category: .action,
-                                         method: .tap,
-                                         object: .libraryPanel,
-                                         value: .syncPanel,
-                                         extras: nil)
+            store.dispatchLegacy(action)
         }
     }
 
@@ -707,15 +785,19 @@ class TabManagerMiddleware: BookmarksRefactorFeatureFlagProvider {
         case MainMenuActionType.tapToggleUserAgent:
             changeUserAgent(forWindow: action.windowUUID)
         case MainMenuMiddlewareActionType.requestTabInfo:
-            provideTabInfo(forWindow: action.windowUUID)
-        case MainMenuDetailsActionType.tapAddToBookmarks:
+            provideTabInfo(forWindow: action.windowUUID, accountData: defaultAccountData())
+            handleDidInstantiateViewAction(action: action)
+        case MainMenuMiddlewareActionType.requestTabInfoForSiteProtectionsHeader:
+            provideTabInfoForSiteProtectionsHeader(forWindow: action.windowUUID)
+        case MainMenuDetailsActionType.tapAddToBookmarks, MainMenuActionType.tapAddToBookmarks:
             guard let tabID = action.tabID else { return }
             let shareItem = createShareItem(with: tabID, and: action.windowUUID)
             addToBookmarks(shareItem)
 
-            store.dispatch(
+            guard let shareItem else { return }
+            store.dispatchLegacy(
                 GeneralBrowserAction(
-                    toastType: .addBookmark,
+                    toastType: .addBookmark(urlString: shareItem.url),
                     windowUUID: action.windowUUID,
                     actionType: GeneralBrowserActionType.showToast
                 )
@@ -724,9 +806,9 @@ class TabManagerMiddleware: BookmarksRefactorFeatureFlagProvider {
             addToReadingList(with: action.tabID, uuid: action.windowUUID)
         case MainMenuDetailsActionType.tapRemoveFromReadingList:
             removeFromReadingList(with: action.tabID, uuid: action.windowUUID)
-        case MainMenuDetailsActionType.tapAddToShortcuts:
+        case MainMenuDetailsActionType.tapAddToShortcuts, MainMenuActionType.tapAddToShortcuts:
             addToShortcuts(with: action.tabID, uuid: action.windowUUID)
-        case MainMenuDetailsActionType.tapRemoveFromShortcuts:
+        case MainMenuDetailsActionType.tapRemoveFromShortcuts, MainMenuActionType.tapRemoveFromShortcuts:
             removeFromShortcuts(with: action.tabID, uuid: action.windowUUID)
 
         default:
@@ -754,7 +836,7 @@ class TabManagerMiddleware: BookmarksRefactorFeatureFlagProvider {
         let isPinned: Bool
     }
 
-    private func provideTabInfo(forWindow windowUUID: WindowUUID) {
+    private func provideTabInfo(forWindow windowUUID: WindowUUID, accountData: AccountData, profileImage: UIImage? = nil) {
         guard let selectedTab = tabManager(for: windowUUID).selectedTab else {
             logger.log(
                 "Attempted to get `selectedTab` but it was `nil` when in shouldn't be",
@@ -765,7 +847,7 @@ class TabManagerMiddleware: BookmarksRefactorFeatureFlagProvider {
         }
 
         fetchProfileTabInfo(for: selectedTab.url) { profileTabInfo in
-            store.dispatch(
+            store.dispatchLegacy(
                 MainMenuAction(
                     windowUUID: windowUUID,
                     actionType: MainMenuActionType.updateCurrentTabInfo,
@@ -780,7 +862,9 @@ class TabManagerMiddleware: BookmarksRefactorFeatureFlagProvider {
                         readerModeIsAvailable: selectedTab.readerModeAvailableOrActive,
                         isBookmarked: profileTabInfo.isBookmarked,
                         isInReadingList: profileTabInfo.isInReadingList,
-                        isPinned: profileTabInfo.isPinned
+                        isPinned: profileTabInfo.isPinned,
+                        accountData: accountData,
+                        accountProfileImage: profileImage
                     )
                 )
             )
@@ -838,6 +922,51 @@ class TabManagerMiddleware: BookmarksRefactorFeatureFlagProvider {
         }
     }
 
+    private func handleDidInstantiateViewAction(action: MainMenuAction) {
+        let accountData = getAccountData()
+        if let iconURL = accountData.iconURL {
+            GeneralizedImageFetcher().getImageFor(url: iconURL) { [weak self] image in
+                guard let self else { return }
+                self.provideTabInfo(forWindow: action.windowUUID, accountData: accountData, profileImage: image)
+            }
+        } else {
+            provideTabInfo(forWindow: action.windowUUID, accountData: accountData)
+        }
+    }
+
+    private func getAccountData() -> AccountData {
+        let rustAccount = RustFirefoxAccounts.shared
+        let needsReAuth = rustAccount.accountNeedsReauth()
+
+        if let userProfile = rustAccount.userProfile {
+            let title: String = {
+                return userProfile.displayName ?? userProfile.email
+            }()
+
+            let subtitle: String? = needsReAuth ?
+                .MainMenu.Account.SyncErrorDescription : .MainMenu.Account.SignedInDescription
+
+            var iconURL: URL?
+            if let str = rustAccount.userProfile?.avatarUrl,
+               let url = URL(string: str) {
+                iconURL = url
+            }
+
+            return AccountData(title: title,
+                               subtitle: subtitle,
+                               needsReAuth: needsReAuth,
+                               iconURL: iconURL)
+        }
+        return defaultAccountData()
+    }
+
+    private func defaultAccountData() -> AccountData {
+        return AccountData(title: .MainMenu.Account.SignedOutTitle,
+                           subtitle: .MainMenu.Account.SignedOutDescriptionV2,
+                           needsReAuth: nil,
+                           iconURL: nil)
+    }
+
     private func absoluteStringFrom(_ url: URL) -> String? {
         if let urlDecoded = url.decodeReaderModeURL {
             return urlDecoded.absoluteString
@@ -876,19 +1005,56 @@ class TabManagerMiddleware: BookmarksRefactorFeatureFlagProvider {
         }
     }
 
+    private func provideTabInfoForSiteProtectionsHeader(forWindow windowUUID: WindowUUID) {
+        guard let selectedTab = tabManager(for: windowUUID).selectedTab else {
+            logger.log(
+                "Attempted to get `selectedTab` but it was `nil` when in shouldn't be",
+                level: .fatal,
+                category: .tabs
+            )
+            return
+        }
+        store.dispatchLegacy(
+            MainMenuAction(
+                windowUUID: windowUUID,
+                actionType: MainMenuActionType.updateSiteProtectionsHeader,
+                siteProtectionsData: SiteProtectionsData(
+                    title: selectedTab.displayTitle,
+                    subtitle: selectedTab.url?.baseDomain,
+                    image: selectedTab.url?.absoluteString,
+                    state: getSiteProtectionState(for: selectedTab)
+                )
+            )
+        )
+    }
+
+    private func getSiteProtectionState(for selectedTab: Tab) -> SiteProtectionsState {
+        let isContentBlockingConfigEnabled = profile.prefs.boolForKey(ContentBlockingConfig.Prefs.EnabledKey) ?? true
+        let hasSecureContent = selectedTab.currentWebView()?.hasOnlySecureContent ?? false
+
+        if !hasSecureContent {
+            return .notSecure
+        }
+
+        if isContentBlockingConfigEnabled {
+            return .on
+        }
+
+        return .off
+    }
+
     // MARK: - Homepage Related Actions
     private func resolveHomepageActions(with action: Action) {
         switch action.actionType {
-        case HeaderActionType.toggleHomepageMode:
-            tabManager(for: action.windowUUID).switchPrivacyMode()
-        case HomepageActionType.initialize, JumpBackInActionType.fetchLocalTabs:
-            store.dispatch(
-                TabManagerAction(
-                    recentTabs: tabManager(for: action.windowUUID).recentlyAccessedNormalTabs,
-                    windowUUID: action.windowUUID,
-                    actionType: TabManagerMiddlewareActionType.fetchRecentTabs
-                )
-            )
+        case HomepageActionType.viewWillAppear,
+            HomepageMiddlewareActionType.jumpBackInLocalTabsUpdated,
+            TopTabsActionType.didTapNewTab,
+            TopTabsActionType.didTapCloseTab:
+            dispatchRecentlyAccessedTabs(action: action)
+        case JumpBackInActionType.tapOnCell:
+            guard let jumpBackInAction = action as? JumpBackInAction,
+                  let tab = jumpBackInAction.tab else { return }
+            tabManager(for: action.windowUUID).selectTab(tab)
         default:
             break
         }
@@ -914,6 +1080,14 @@ class TabManagerMiddleware: BookmarksRefactorFeatureFlagProvider {
         Task {
             await self.bookmarksSaver.createBookmark(url: shareItem.url, title: shareItem.title, position: 0)
         }
+
+        var userData = [QuickActionInfos.tabURLKey: shareItem.url]
+        if let title = shareItem.title {
+            userData[QuickActionInfos.tabTitleKey] = title
+        }
+        QuickActionsImplementation().addDynamicApplicationShortcutItemOfType(.openLastBookmark,
+                                                                             withUserData: userData,
+                                                                             toApplication: .shared)
     }
 
     private func addToReadingList(with tabID: TabUUID?, uuid: WindowUUID) {
@@ -929,7 +1103,7 @@ class TabManagerMiddleware: BookmarksRefactorFeatureFlagProvider {
             addedBy: UIDevice.current.name
         )
 
-        store.dispatch(
+        store.dispatchLegacy(
             GeneralBrowserAction(
                 toastType: .addToReadingList,
                 windowUUID: uuid,
@@ -948,7 +1122,7 @@ class TabManagerMiddleware: BookmarksRefactorFeatureFlagProvider {
 
         profile.readingList.deleteRecord(record, completion: nil)
 
-        store.dispatch(
+        store.dispatchLegacy(
             GeneralBrowserAction(
                 toastType: .removeFromReadingList,
                 windowUUID: uuid,
@@ -966,17 +1140,7 @@ class TabManagerMiddleware: BookmarksRefactorFeatureFlagProvider {
 
         let site = Site.createBasicSite(url: url, title: tab.displayTitle)
 
-        profile.pinnedSites.addPinnedTopSite(site).uponQueue(.main) { result in
-            guard result.isSuccess else { return }
-
-            store.dispatch(
-                GeneralBrowserAction(
-                    toastType: .addShortcut,
-                    windowUUID: uuid,
-                    actionType: GeneralBrowserActionType.showToast
-                )
-            )
-        }
+        profile.pinnedSites.addPinnedTopSite(site)
     }
 
     private func removeFromShortcuts(with tabID: TabUUID?, uuid: WindowUUID) {
@@ -988,20 +1152,30 @@ class TabManagerMiddleware: BookmarksRefactorFeatureFlagProvider {
 
         let site = Site.createBasicSite(url: url, title: tab.displayTitle)
 
-        profile.pinnedSites.removeFromPinnedTopSites(site).uponQueue(.main) { result in
-            guard result.isSuccess else { return }
-            store.dispatch(
-                GeneralBrowserAction(
-                    toastType: .removeShortcut,
-                    windowUUID: uuid,
-                    actionType: GeneralBrowserActionType.showToast
-                )
-            )
-        }
+        profile.pinnedSites.removeFromPinnedTopSites(site)
     }
 
     private func preserveTabs(uuid: WindowUUID) {
         let tabManager = tabManager(for: uuid)
         tabManager.preserveTabs()
+    }
+
+    /// Sends out updated recent tabs which is currently used for the homepage jumpBackIn section
+    private func dispatchRecentlyAccessedTabs(action: Action) {
+        // TODO: FXIOS-10919 - Consider testing better with Tasks here
+        // and modifying how we fetch recentlyAccessedNormalTabs since
+        // it doesn't retrieve the proper tabs without this task block
+        // See more details on issue here [FXIOS-5149] [FXIOS-11644]
+        Task { @MainActor in
+            // [FXIOS-5149] Recent tabs need to be accessed from .main thread
+            let recentTabs = self.tabManager(for: action.windowUUID).recentlyAccessedNormalTabs
+            store.dispatchLegacy(
+                TabManagerAction(
+                    recentTabs: recentTabs,
+                    windowUUID: action.windowUUID,
+                    actionType: TabManagerMiddlewareActionType.fetchedRecentTabs
+                )
+            )
+        }
     }
 }

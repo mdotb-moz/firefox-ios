@@ -42,7 +42,12 @@ class PullRefreshView: UIView,
     }
     private var easterEggTimer: DispatchSourceTimer?
     private var isIpad: Bool {
+        // An additional check for horizontalSizeClass is needed since for iPad in multi windows state
+        // the smallest window possible has horizontalSizeClass equal to compact, thus behaving like an iPhone.
         return traitCollection.userInterfaceIdiom == .pad && traitCollection.horizontalSizeClass == .regular
+    }
+    private var isToolbarRefactorEnabled: Bool {
+        return FxNimbus.shared.features.toolbarRefactorFeature.value().enabled
     }
 
     init(parentScrollView: UIScrollView?,
@@ -196,7 +201,7 @@ class PullRefreshView: UIView,
     ///
     /// The calculation is pure empirical.
     /// It compares the smaller scroll view dimension with the blink threshold that is also
-    /// the limit above a pull refresh can happen. 
+    /// the limit above a pull refresh can happen.
     /// That dimension is divided by 4.0 because on small devices those dimension becomes comparable
     /// and a shrink factor is needed otherwise pull to refresh wouldn't be possible,
     /// since the content offset of the scroll view wouldn't be enough to go above the threshold.
@@ -228,7 +233,7 @@ class PullRefreshView: UIView,
 
     func applyTheme(theme: any Theme) {
         currentTheme = theme
-        backgroundColor = theme.colors.layer1
+        backgroundColor = isToolbarRefactorEnabled ? theme.colors.layerSurfaceLow : theme.colors.layer1
         progressView.tintColor = theme.colors.iconPrimary
     }
 

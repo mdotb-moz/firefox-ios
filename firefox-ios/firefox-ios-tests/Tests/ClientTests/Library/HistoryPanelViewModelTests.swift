@@ -38,15 +38,13 @@ class HistoryPanelViewModelTests: XCTestCase {
         HistoryPanelViewModel.Sections.allCases.forEach({ section in
             switch section {
             case .lastHour:
-                XCTAssertEqual(section.title, .LibraryPanel.Sections.LastHour)
-            case .today:
-                XCTAssertEqual(section.title, .LibraryPanel.Sections.Today)
-            case .yesterday:
-                XCTAssertEqual(section.title, .LibraryPanel.Sections.Yesterday)
-            case .lastWeek:
-                XCTAssertEqual(section.title, .LibraryPanel.Sections.LastWeek)
-            case .lastMonth:
-                XCTAssertEqual(section.title, .LibraryPanel.Sections.LastMonth)
+                XCTAssertEqual(section.title, .LibraryPanel.History.ClearHistorySheet.LastHourOption)
+            case .lastTwentyFourHours:
+                XCTAssertEqual(section.title, .LibraryPanel.History.ClearHistorySheet.LastTwentyFourHoursOption)
+            case .lastSevenDays:
+                XCTAssertEqual(section.title, .LibraryPanel.History.ClearHistorySheet.LastSevenDaysOption)
+            case .lastFourWeeks:
+                XCTAssertEqual(section.title, .LibraryPanel.History.ClearHistorySheet.LastFourWeeksOption)
             case .older:
                 XCTAssertEqual(section.title, .LibraryPanel.Sections.Older)
             case .additionalHistoryActions, .searchResults:
@@ -60,7 +58,6 @@ class HistoryPanelViewModelTests: XCTestCase {
 
         fetchHistory { success in
             XCTAssertTrue(success)
-            XCTAssertNotNil(self.subject.searchTermGroups)
             XCTAssertFalse(self.subject.dateGroupedSites.isEmpty)
             XCTAssertFalse(self.subject.visibleSections.isEmpty)
         }
@@ -164,100 +161,9 @@ class HistoryPanelViewModelTests: XCTestCase {
             self.subject.removeAllData()
 
             XCTAssertEqual(self.subject.currentFetchOffset, 0)
-            XCTAssertTrue(self.subject.searchTermGroups.isEmpty)
             XCTAssertTrue(self.subject.dateGroupedSites.isEmpty)
             XCTAssertTrue(self.subject.visibleSections.isEmpty)
         }
-    }
-
-    func testShouldNotAddGroupToSections() {
-        let searchTermGroup = createSearchTermGroup(timestamp: Date().toMicrosecondsSince1970())
-        XCTAssertNil(self.subject.shouldAddGroupToSections(group: searchTermGroup))
-    }
-
-    func testGroupBelongToSection_ForLastHour() {
-        let controlledCurrentDate = Date().noon
-        let searchTermDate = Calendar.current.date(byAdding: .minute, value: -30, to: controlledCurrentDate)!
-        let searchTermGroup = createSearchTermGroup(timestamp: searchTermDate.toMicrosecondsSince1970())
-
-        guard let section = self.subject.groupBelongsToSection(asGroup: searchTermGroup,
-                                                               comparisonDate: controlledCurrentDate) else {
-            XCTFail("Expected to return lastHour section")
-            return
-        }
-
-        XCTAssertEqual(section, .lastHour)
-    }
-
-    func testGroupBelongToSection_ForToday() {
-        let controlledCurrentDate = Date().noon
-        let searchTermDate = Calendar.current.date(byAdding: .hour, value: -2, to: controlledCurrentDate)!
-        let searchTermGroup = createSearchTermGroup(timestamp: searchTermDate.toMicrosecondsSince1970())
-
-        guard let section = self.subject.groupBelongsToSection(asGroup: searchTermGroup,
-                                                               comparisonDate: controlledCurrentDate) else {
-            XCTFail("Expected to return today section")
-            return
-        }
-
-        XCTAssertEqual(section, .today)
-    }
-
-    func testGroupBelongToSection_ForYesterday() {
-        let controlledCurrentDate = Date().noon
-        let searchTermDate = Calendar.current.date(byAdding: .day, value: -1, to: controlledCurrentDate)!
-        let searchTermGroup = createSearchTermGroup(timestamp: searchTermDate.toMicrosecondsSince1970())
-
-        guard let section = self.subject.groupBelongsToSection(asGroup: searchTermGroup,
-                                                               comparisonDate: controlledCurrentDate) else {
-            XCTFail("Expected to return yesterday section")
-            return
-        }
-
-        XCTAssertEqual(section, .yesterday)
-    }
-
-    func testGroupBelongToSection_ForLastWeek() {
-        let controlledCurrentDate = Date().noon
-        let searchTermDate = Calendar.current.date(byAdding: .day, value: -6, to: controlledCurrentDate)!
-        let searchTermGroup = createSearchTermGroup(timestamp: searchTermDate.toMicrosecondsSince1970())
-
-        guard let section = self.subject.groupBelongsToSection(asGroup: searchTermGroup,
-                                                               comparisonDate: controlledCurrentDate) else {
-            XCTFail("Expected to return lastWeek section")
-            return
-        }
-
-        XCTAssertEqual(section, .lastWeek)
-    }
-
-    func testGroupBelongToSection_ForTwoLastWeek() {
-        let controlledCurrentDate = Date().noon
-        let searchTermDate = Calendar.current.date(byAdding: .day, value: -13, to: controlledCurrentDate)!
-        let searchTermGroup = createSearchTermGroup(timestamp: searchTermDate.toMicrosecondsSince1970())
-
-        guard let section = self.subject.groupBelongsToSection(asGroup: searchTermGroup,
-                                                               comparisonDate: controlledCurrentDate) else {
-            XCTFail("Expected to return lastMonth section")
-            return
-        }
-
-        XCTAssertEqual(section, .lastMonth)
-    }
-
-    func testShouldAddGroupToSections_ForToday() {
-        let controlledCurrentDate = Date().noon
-        let searchTermDate = Calendar.current.date(byAdding: .hour, value: -2, to: controlledCurrentDate)!
-        let searchTermGroup = createSearchTermGroup(timestamp: searchTermDate.toMicrosecondsSince1970())
-        subject.visibleSections.append(.today)
-
-        guard let section = self.subject.shouldAddGroupToSections(group: searchTermGroup,
-                                                                  comparisonDate: controlledCurrentDate) else {
-            XCTFail("Expected to return today section")
-            return
-        }
-
-        XCTAssertEqual(section, .today)
     }
 
     // MARK: - Deletion

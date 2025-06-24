@@ -4,7 +4,6 @@
 
 import Common
 import ComponentLibrary
-import Shared
 import UIKit
 
 class OnboardingInstructionPopupViewController: UIViewController, Themeable {
@@ -70,7 +69,7 @@ class OnboardingInstructionPopupViewController: UIViewController, Themeable {
     var themeObserver: NSObjectProtocol?
     var didTapButton = false
     var buttonTappedFinishFlow: (() -> Void)?
-    var dismissDelegate: BottomSheetDismissProtocol?
+    weak var dismissDelegate: BottomSheetDismissProtocol?
     let windowUUID: WindowUUID
     var currentWindowUUID: UUID? { windowUUID }
 

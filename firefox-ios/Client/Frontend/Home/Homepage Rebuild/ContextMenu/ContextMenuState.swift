@@ -12,15 +12,14 @@ import Redux
 /// Classes conforming to this protocol can manage adding and removing bookmarks.
 /// Since bookmarks are not using Redux, we use this instead of dispatching an action.
 protocol BookmarksHandlerDelegate: AnyObject {
-    func addBookmark(url: String, title: String?, site: Site?)
-    func removeBookmark(url: URL, title: String?, site: Site?)
+    func addBookmark(urlString: String, title: String?, site: Site?)
+    func removeBookmark(urlString: String, title: String?, site: Site?)
 }
 
 /// State to populate actions for the `PhotonActionSheet` view
 /// Ideally, we want that view to subscribe to the store and update its state following the redux pattern
 /// For now, we will instantiate this state and populate the associated view model instead to avoid
 /// increasing scope of homepage rebuild project.
-
 struct ContextMenuState {
     var site: Site?
     var actions: [[PhotonRowActions]] = [[]]
@@ -114,7 +113,6 @@ struct ContextMenuState {
                                      allowIconScaling: true,
                                      tapHandler: { _ in
             dispatchContextMenuAction(site: site, actionType: ContextMenuActionType.tappedOnRemoveTopSite)
-            // TODO: FXIOS-10171 - Add telemetry
         }).items
     }
 
@@ -124,7 +122,6 @@ struct ContextMenuState {
                                      allowIconScaling: true,
                                      tapHandler: { _ in
             dispatchContextMenuAction(site: site, actionType: ContextMenuActionType.tappedOnPinTopSite)
-            // TODO: FXIOS-10171 - Add telemetry
         }).items
     }
 
@@ -136,7 +133,6 @@ struct ContextMenuState {
                                      allowIconScaling: true,
                                      tapHandler: { _ in
             dispatchContextMenuAction(site: site, actionType: ContextMenuActionType.tappedOnUnpinTopSite)
-            // TODO: FXIOS-10171 - Add telemetry
         }).items
     }
 
@@ -146,7 +142,9 @@ struct ContextMenuState {
                                      allowIconScaling: true,
                                      tapHandler: { _ in
             dispatchSettingsAction(section: .topSites)
-            // TODO: FXIOS-10171 - Add telemetry
+            store.dispatchLegacy(
+                ContextMenuAction(windowUUID: windowUUID, actionType: ContextMenuActionType.tappedOnSettingsAction)
+            )
         }).items
     }
 
@@ -164,7 +162,9 @@ struct ContextMenuState {
                 return
             }
             dispatchOpenNewTabAction(siteURL: url, isPrivate: false, selectNewTab: true)
-            // TODO: FXIOS-10171 - Add telemetry
+            store.dispatchLegacy(
+                ContextMenuAction(windowUUID: windowUUID, actionType: ContextMenuActionType.tappedOnSponsoredAction)
+            )
         }).items
     }
 
@@ -222,7 +222,7 @@ struct ContextMenuState {
             allowIconScaling: true
         ) { _ in
             dispatchOpenNewTabAction(siteURL: siteURL, isPrivate: true)
-            // TODO: FXIOS-10171 - Add telemetry
+            dispatchContextMenuActionForSection(actionType: ContextMenuActionType.tappedOnOpenNewPrivateTab)
         }.items
     }
 
@@ -242,16 +242,7 @@ struct ContextMenuState {
                                      iconString: StandardImageIdentifiers.Large.bookmarkSlash,
                                      allowIconScaling: true,
                                      tapHandler: { _ in
-            guard let siteURL = site.url.asURL else {
-                self.logger.log(
-                    "Unable to retrieve URL for \(site.url), unable to remove bookmarks",
-                    level: .warning,
-                    category: .homepage
-                )
-                return
-            }
-            bookmarkDelegate.removeBookmark(url: siteURL, title: site.title, site: site)
-            // TODO: FXIOS-10171 - Add telemetry
+            bookmarkDelegate.removeBookmark(urlString: site.url, title: site.title, site: site)
         })
     }
 
@@ -261,8 +252,7 @@ struct ContextMenuState {
                                      allowIconScaling: true,
                                      tapHandler: { _ in
             // The method in BVC also handles the toast for this use case
-            bookmarkDelegate.addBookmark(url: site.url, title: site.title, site: site)
-            // TODO: FXIOS-10171 - Add telemetry
+            bookmarkDelegate.addBookmark(urlString: site.url, title: site.title, site: site)
         })
     }
 
@@ -272,7 +262,7 @@ struct ContextMenuState {
             iconString: StandardImageIdentifiers.Large.share,
             allowIconScaling: true,
             tapHandler: { _ in
-                guard let url = URL(string: siteURL, invalidCharacters: false) else {
+                guard let url = URL(string: siteURL) else {
                     self.logger.log(
                         "Unable to retrieve URL for \(siteURL), return early",
                         level: .warning,
@@ -295,7 +285,7 @@ struct ContextMenuState {
 
     // MARK: Dispatch Actions
     private func dispatchSettingsAction(section: Route.SettingsSection) {
-        store.dispatch(
+        store.dispatchLegacy(
             NavigationBrowserAction(
                 navigationDestination: NavigationDestination(.settings(section)),
                 windowUUID: windowUUID,
@@ -305,7 +295,7 @@ struct ContextMenuState {
     }
 
     private func dispatchOpenNewTabAction(siteURL: URL, isPrivate: Bool, selectNewTab: Bool = false) {
-        store.dispatch(
+        store.dispatchLegacy(
             NavigationBrowserAction(
                 navigationDestination: NavigationDestination(
                     .newTab,
@@ -320,7 +310,7 @@ struct ContextMenuState {
     }
 
     private func dispatchShareSheetAction(shareSheetConfiguration: ShareSheetConfiguration) {
-        store.dispatch(
+        store.dispatchLegacy(
             NavigationBrowserAction(
                 navigationDestination: NavigationDestination(.shareSheet(shareSheetConfiguration)),
                 windowUUID: windowUUID,
@@ -330,9 +320,19 @@ struct ContextMenuState {
     }
 
     private func dispatchContextMenuAction(site: Site, actionType: ActionType) {
-        store.dispatch(
+        store.dispatchLegacy(
             ContextMenuAction(
                 site: site,
+                windowUUID: windowUUID,
+                actionType: actionType
+            )
+        )
+    }
+
+    private func dispatchContextMenuActionForSection(actionType: ActionType) {
+        store.dispatchLegacy(
+            ContextMenuAction(
+                section: configuration.homepageSection,
                 windowUUID: windowUUID,
                 actionType: actionType
             )

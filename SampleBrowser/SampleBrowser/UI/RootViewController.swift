@@ -14,8 +14,11 @@ class RootViewController: UIViewController,
                           AddressToolbarContainerDelegate,
                           SearchSuggestionDelegate,
                           SettingsDelegate,
-                          FindInPageBarDelegate,
                           Themeable {
+    private struct UX {
+        static let addressToolbarContainerHorizontalPadding: CGFloat = 16.0
+    }
+
     var currentWindowUUID: UUID?
     var themeManager: ThemeManager
     var themeObserver: NSObjectProtocol?
@@ -29,13 +32,12 @@ class RootViewController: UIViewController,
 
     private var browserVC: BrowserViewController
     private var searchVC: SearchViewController
-    private var findInPageBar: FindInPageBar?
     private var errorPage: ErrorPageViewController?
 
     private var model = RootViewControllerModel()
 
     // MARK: - Init
-    init(engineProvider: EngineProvider = AppContainer.shared.resolve(),
+    init(engineProvider: EngineProvider,
          windowUUID: UUID?,
          themeManager: ThemeManager = AppContainer.shared.resolve()) {
         self.browserVC = BrowserViewController(engineProvider: engineProvider)
@@ -103,9 +105,11 @@ class RootViewController: UIViewController,
             statusBarFiller.trailingAnchor.constraint(equalTo: view.trailingAnchor),
 
             addressToolbarContainer.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-            addressToolbarContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            addressToolbarContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor,
+                                                             constant: UX.addressToolbarContainerHorizontalPadding),
             addressToolbarContainer.bottomAnchor.constraint(equalTo: browserVC.view.topAnchor),
-            addressToolbarContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+            addressToolbarContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor,
+                                                              constant: -UX.addressToolbarContainerHorizontalPadding)
         ])
 
         model.addressToolbarDelegate = self
@@ -201,16 +205,8 @@ class RootViewController: UIViewController,
         updateAddressToolbar(url: URL(string: url))
     }
 
-    func onFindInPage(selected: String) {
-        showFindInPage()
-    }
-
-    func onFindInPage(currentResult: Int) {
-        findInPageBar?.currentResult = currentResult
-    }
-
-    func onFindInPage(totalResults: Int) {
-        findInPageBar?.totalResults = totalResults
+    func showFindInPage() {
+        browserVC.showFindInPage()
     }
 
     // MARK: - AddressToolbarDelegate
@@ -298,6 +294,16 @@ class RootViewController: UIViewController,
         browserVC.scrollToTop()
     }
 
+    func loadPopupWebSource() {
+        let path = URL(fileURLWithPath: Bundle.main.path(forResource: "testPopUp", ofType: "html") ?? "")
+        browserVC.loadUrlOrSearch(SearchTerm(term: path.absoluteString))
+    }
+
+    func loadPrintWebSource() {
+        let path = URL(fileURLWithPath: Bundle.main.path(forResource: "testPrintPreview", ofType: "html") ?? "")
+        browserVC.loadUrlOrSearch(SearchTerm(term: path.absoluteString))
+    }
+
     func showErrorPage(page: ErrorPageViewController) {
         self.errorPage = page
         addChild(page)
@@ -323,47 +329,11 @@ class RootViewController: UIViewController,
         self.errorPage = nil
     }
 
-    func showFindInPage() {
-        let findInPageBar = FindInPageBar()
-        findInPageBar.translatesAutoresizingMaskIntoConstraints = false
-        findInPageBar.delegate = self
-        self.findInPageBar = findInPageBar
-
-        view.addSubview(findInPageBar)
-
-        NSLayoutConstraint.activate([
-            findInPageBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            findInPageBar.bottomAnchor.constraint(equalTo: navigationToolbar.topAnchor),
-            findInPageBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            findInPageBar.heightAnchor.constraint(equalToConstant: 46)
-        ])
-    }
-
     // MARK: - AddressToolbarContainerDelegate
     func didTapMenu() {
         let settingsVC = SettingsViewController()
         settingsVC.delegate = self
         present(settingsVC, animated: true)
-    }
-
-    // MARK: - FindInPageBarDelegate
-    func findInPage(_ findInPage: FindInPageBar, textChanged text: String) {
-        browserVC.findInPage(text: text, function: .find)
-    }
-
-    func findInPage(_ findInPage: FindInPageBar, findPreviousWithText text: String) {
-        browserVC.findInPage(text: text, function: .findPrevious)
-    }
-
-    func findInPage(_ findInPage: FindInPageBar, findNextWithText text: String) {
-        browserVC.findInPage(text: text, function: .findNext)
-    }
-
-    func findInPageDidPressClose(_ findInPage: FindInPageBar) {
-        browserVC.findInPageDone()
-        findInPageBar?.endEditing(true)
-        findInPageBar?.removeFromSuperview()
-        findInPageBar = nil
     }
 
     // MARK: Themeable

@@ -3,8 +3,6 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/
 
 import Foundation
-import Common
-import Shared
 
 enum LaunchCoordinatorType {
     case SceneCoordinator, BrowserCoordinator
@@ -15,7 +13,7 @@ enum LaunchType {
     case termsOfService(manager: TermsOfServiceManager)
 
     /// Showing the intro onboarding
-    case intro(manager: IntroScreenManager)
+    case intro(manager: IntroScreenManagerProtocol)
 
     /// Show the update onboarding
     case update(viewModel: UpdateViewModel)

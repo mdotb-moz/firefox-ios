@@ -4,8 +4,6 @@
 
 import Common
 import Storage
-import Shared
-import Redux
 import SiteImageView
 
 import enum MozillaAppServices.VisitType
@@ -29,6 +27,11 @@ class RemoteTabsTableViewController: UITableViewController,
     private var hiddenSections = Set<Int>()
     private let logger: Logger
 
+    private var isTabTrayUIExperimentsEnabled: Bool {
+        return featureFlags.isFeatureEnabled(.tabTrayUIExperiments, checking: .buildOnly)
+        && UIDevice.current.userInterfaceIdiom != .pad
+    }
+
     var themeManager: ThemeManager
     var themeObserver: NSObjectProtocol?
     var notificationCenter: NotificationProtocol
@@ -37,7 +40,17 @@ class RemoteTabsTableViewController: UITableViewController,
     var currentWindowUUID: UUID? { windowUUID }
 
     private var isShowingEmptyView: Bool { state.showingEmptyState != nil }
-    private let emptyView: RemoteTabsEmptyView = .build()
+    private lazy var emptyView: RemoteTabsEmptyViewProtocol = {
+        if isTabTrayUIExperimentsEnabled {
+            let view = ExperimentRemoteTabsEmptyView()
+            view.translatesAutoresizingMaskIntoConstraints = false
+            return view
+        } else {
+            let view = RemoteTabsEmptyView()
+            view.translatesAutoresizingMaskIntoConstraints = false
+            return view
+        }
+    }()
 
     private var closeTabRemoteDeviceId: String?
     private var closeTab: RemoteTab?
@@ -110,12 +123,12 @@ class RemoteTabsTableViewController: UITableViewController,
 
         tableView.accessibilityIdentifier = AccessibilityIdentifiers.TabTray.syncedTabs
 
-        tableView.addSubview(emptyView)
+        view.addSubview(emptyView)
         NSLayoutConstraint.activate([
-            emptyView.centerXAnchor.constraint(equalTo: tableView.centerXAnchor),
-            emptyView.topAnchor.constraint(equalTo: tableView.topAnchor),
-            emptyView.leadingAnchor.constraint(equalTo: tableView.leadingAnchor),
-            emptyView.trailingAnchor.constraint(equalTo: tableView.trailingAnchor),
+            emptyView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            emptyView.topAnchor.constraint(equalTo: view.topAnchor),
+            emptyView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            emptyView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
         ])
 
         reloadUI()
@@ -145,30 +158,50 @@ class RemoteTabsTableViewController: UITableViewController,
         }
     }
 
+    private func retrieveTheme() -> Theme {
+        if shouldUsePrivateOverride {
+            return themeManager.resolvedTheme(with: false)
+        } else {
+            return themeManager.getCurrentTheme(for: windowUUID)
+        }
+    }
+
+    // MARK: Themeable
+    var shouldUsePrivateOverride: Bool {
+        return featureFlags.isFeatureEnabled(.feltPrivacySimplifiedUI, checking: .buildOnly)
+    }
+
+    var shouldBeInPrivateTheme: Bool {
+        return false
+    }
+
     func applyTheme() {
-        let theme = themeManager.getCurrentTheme(for: windowUUID)
+        let theme = retrieveTheme()
         emptyView.applyTheme(theme: theme)
         tableView.visibleCells.forEach { ($0 as? ThemeApplicable)?.applyTheme(theme: theme) }
+        view.backgroundColor = theme.colors.layer3
     }
 
     private func configureEmptyView() {
         guard let emptyStateReason = state.showingEmptyState else { return }
         emptyView.configure(config: emptyStateReason, delegate: remoteTabsPanel)
-        emptyView.applyTheme(theme: themeManager.getCurrentTheme(for: windowUUID))
+        emptyView.applyTheme(theme: retrieveTheme())
     }
 
     private func show(toast: Toast,
                       afterWaiting delay: DispatchTimeInterval = Toast.UX.toastDelayBefore,
                       duration: DispatchTimeInterval? = Toast.UX.toastDismissAfter) {
+        guard !isTabTrayUIExperimentsEnabled else { return }
+
         if let buttonToast = toast as? ButtonToast {
             self.buttonToast = buttonToast
         }
 
         toast.showToast(viewController: self, delay: delay, duration: duration) { toast in
             [
-                toast.leadingAnchor.constraint(equalTo: self.view.leadingAnchor,
+                toast.leadingAnchor.constraint(equalTo: self.view.safeAreaLayoutGuide.leadingAnchor,
                                                constant: Toast.UX.toastSidePadding),
-                toast.trailingAnchor.constraint(equalTo: self.view.trailingAnchor,
+                toast.trailingAnchor.constraint(equalTo: self.view.safeAreaLayoutGuide.trailingAnchor,
                                                 constant: -Toast.UX.toastSidePadding),
                 toast.bottomAnchor.constraint(equalTo: self.view.safeAreaLayoutGuide.bottomAnchor)
             ]
@@ -296,7 +329,7 @@ class RemoteTabsTableViewController: UITableViewController,
         cell.descriptionLabel.text = tab.URL.absoluteString
         cell.leftImageView.setFavicon(FaviconImageViewModel(siteURLString: tab.URL.absoluteString))
         cell.accessoryView = nil
-        cell.applyTheme(theme: themeManager.getCurrentTheme(for: windowUUID))
+        cell.applyTheme(theme: retrieveTheme())
     }
 
     @objc
@@ -339,7 +372,7 @@ class RemoteTabsTableViewController: UITableViewController,
             let viewModel = ButtonToastViewModel(labelText: .TabsTray.CloseTabsToast.SingleTabTitle,
                                                  buttonText: .UndoString)
             let toast = ButtonToast(viewModel: viewModel,
-                                    theme: themeManager.getCurrentTheme(for: windowUUID),
+                                    theme: retrieveTheme(),
                                     completion: { didTapUndoButton in
                                         if didTapUndoButton {
                                             self.undo()
@@ -398,7 +431,7 @@ class RemoteTabsTableViewController: UITableViewController,
         let tapGesture = UITapGestureRecognizer(target: self,
                                                 action: #selector(sectionHeaderTapped(sender:)))
         headerView.addGestureRecognizer(tapGesture)
-        headerView.applyTheme(theme: themeManager.getCurrentTheme(for: windowUUID))
+        headerView.applyTheme(theme: retrieveTheme())
         /*
         * (Copied from legacy RemoteTabsClientAndTabsDataSource)
         * A note on timestamps.

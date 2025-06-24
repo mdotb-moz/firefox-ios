@@ -4,7 +4,6 @@
 
 import SwiftUI
 import Common
-import Shared
 import Storage
 import struct MozillaAppServices.UpdatableAddressFields
 import struct MozillaAppServices.Address
@@ -223,8 +222,6 @@ final class AddressListViewModel: ObservableObject, FeatureFlaggable {
         self.addressProvider.addAddress(address: address) { [weak self] result in
             DispatchQueue.main.async {
                 switch result {
-                case .success:
-                    self?.presentToast?(.saved)
                 case .failure:
                     self?.presentToast?(
                         .error(
@@ -251,6 +248,7 @@ final class AddressListViewModel: ObservableObject, FeatureFlaggable {
                             })
                         )
                     )
+                default: break
                 }
                 self?.destination = nil
                 self?.fetchAddresses()
@@ -289,8 +287,6 @@ final class AddressListViewModel: ObservableObject, FeatureFlaggable {
             guard let self else { return }
             DispatchQueue.main.async {
                 switch result {
-                case .success:
-                    self.presentToast?(.removed)
                 case .failure:
                     self.presentToast?(
                         .error(
@@ -299,6 +295,7 @@ final class AddressListViewModel: ObservableObject, FeatureFlaggable {
                             })
                         )
                     )
+                default: break
                 }
                 self.toggleEditMode()
                 self.destination = nil

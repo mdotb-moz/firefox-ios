@@ -12,11 +12,11 @@ import enum MozillaAppServices.VisitType
 protocol BrowserNavigationHandler: AnyObject, QRCodeNavigationHandler {
     /// Asks to show a settings page, can be a general settings page or a child page
     /// - Parameter settings: The settings route we're trying to get to
-    /// - Parameter onDismiss: An optional closure that is executed when the settings page is dismissed. 
+    /// - Parameter onDismiss: An optional closure that is executed when the settings page is dismissed.
     /// This closure takes no parameters and returns no value.
     func show(settings: Route.SettingsSection, onDismiss: (() -> Void)?)
 
-    /// Asks to show a enhancedTrackingProtection page, can be a general 
+    /// Asks to show a enhancedTrackingProtection page, can be a general
     /// enhancedTrackingProtection page or a child page
     func showEnhancedTrackingProtection(sourceView: UIView)
 
@@ -40,35 +40,6 @@ protocol BrowserNavigationHandler: AnyObject, QRCodeNavigationHandler {
                         toastContainer: UIView,
                         popoverArrowDirection: UIPopoverArrowDirection)
 
-    /// Initiates the modal presentation of the Fakespot flow for analyzing the authenticity of a product's reviews.
-    /// - Parameter productURL: The URL of the product for which the reviews will be analyzed.
-    func showFakespotFlowAsModal(productURL: URL)
-
-    /// Initiates the sidebar presentation of the Fakespot flow for analyzing the authenticity of a product's reviews.
-    /// - Parameter productURL: The URL of the product for which the reviews will be analyzed.
-    /// - Parameter sidebarContainer: The view that will contain the sidebar.
-    /// - Parameter parentViewController: The view controller that the Fakespot flow will be a child of.
-    func showFakespotFlowAsSidebar(productURL: URL,
-                                   sidebarContainer: SidebarEnabledViewProtocol,
-                                   parentViewController: UIViewController)
-
-    /// Initiates the modal dismissal of the Fakespot flow for analyzing the authenticity of a product's reviews.
-    /// - Parameter animated: Determines whether the modal is dismissed with animation or not.
-    func dismissFakespotModal(animated: Bool)
-
-    /// Initiates the sidebar dismissal of the Fakespot flow for analyzing the authenticity of a product's reviews.
-    /// - Parameter sidebarContainer: The view that contains the sidebar.
-    /// - Parameter parentViewController: The view controller that the Fakespot flow is a child of.
-    func dismissFakespotSidebar(sidebarContainer: SidebarEnabledViewProtocol, parentViewController: UIViewController)
-
-    /// Initiates the update of the Fakespot sidebar for analyzing the authenticity of a product's reviews.
-    /// - Parameter productURL: The URL of the product for which the reviews will be analyzed. 
-    /// - Parameter sidebarContainer: The view that contains the sidebar.
-    /// - Parameter parentViewController: The view controller that the Fakespot flow is a child of.
-    func updateFakespotSidebar(productURL: URL,
-                               sidebarContainer: SidebarEnabledViewProtocol,
-                               parentViewController: UIViewController)
-
     /// Shows a CreditCardAutofill view to select credit cards in order to autofill cards forms.
     func showCreditCardAutofill(creditCard: CreditCard?,
                                 decryptedCard: UnencryptedCreditCardFields?,
@@ -76,7 +47,7 @@ protocol BrowserNavigationHandler: AnyObject, QRCodeNavigationHandler {
                                 frame: WKFrameInfo?,
                                 alertContainer: UIView)
 
-    /// Displays an autofill interface for saved logins, allowing the user to select from stored login credentials 
+    /// Displays an autofill interface for saved logins, allowing the user to select from stored login credentials
     /// to autofill login forms on the specified web page.
     func showSavedLoginAutofill(tabURL: URL, currentRequestId: String, field: FocusFieldType)
 
@@ -112,6 +83,12 @@ protocol BrowserNavigationHandler: AnyObject, QRCodeNavigationHandler {
     func showEditBookmark(parentFolder: FxBookmarkNode, bookmark: FxBookmarkNode)
 
     func openInNewTab(url: URL, isPrivate: Bool, selectNewTab: Bool)
+
+    /// Shows the Document loading view on screen
+    func showDocumentLoading()
+
+    /// Removes the Document loading view from screen
+    func removeDocumentLoading()
 }
 
 extension BrowserNavigationHandler {

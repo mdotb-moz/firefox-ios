@@ -10,14 +10,17 @@ typealias HomepageItem = HomepageDiffableDataSource.HomeItem
 
 /// Holds the data source configuration for the new homepage as part of the rebuild project
 final class HomepageDiffableDataSource:
-    UICollectionViewDiffableDataSource<HomepageSection, HomepageItem> {
+    UICollectionViewDiffableDataSource<HomepageSection, HomepageItem>,
+    FeatureFlaggable {
     typealias TextColor = UIColor
     typealias NumberOfTilesPerRow = Int
+
     enum HomeSection: Hashable {
         case header
         case messageCard
         case topSites(NumberOfTilesPerRow)
-        case jumpBackIn(TextColor?)
+        case searchBar
+        case jumpBackIn(TextColor?, JumpBackInSectionLayoutConfiguration)
         case bookmarks(TextColor?)
         case pocket(TextColor?)
         case customizeHomepage
@@ -37,30 +40,53 @@ final class HomepageDiffableDataSource:
         case messageCard(MessageCardConfiguration)
         case topSite(TopSiteConfiguration, TextColor?)
         case topSiteEmpty
+        case searchBar
         case jumpBackIn(JumpBackInTabConfiguration)
         case jumpBackInSyncedTab(JumpBackInSyncedTabConfiguration)
         case bookmark(BookmarkConfiguration)
         case pocket(PocketStoryConfiguration)
-        case pocketDiscover(PocketDiscoverConfiguration)
         case customizeHomepage
 
         static var cellTypes: [ReusableCell.Type] {
             return [
                 HomepageHeaderCell.self,
                 HomepageMessageCardCell.self,
+                LegacyTopSiteCell.self,
                 TopSiteCell.self,
                 EmptyTopSiteCell.self,
+                SearchBarCell.self,
                 JumpBackInCell.self,
                 SyncedTabCell.self,
                 BookmarksCell.self,
                 PocketStandardCell.self,
-                PocketDiscoverCell.self,
                 CustomizeHomepageSectionCell.self
             ]
         }
+
+        var telemetryItemType: HomepageTelemetry.ItemType? {
+            switch self {
+            case .topSite:
+                return .topSite
+            case .jumpBackIn:
+                return .jumpBackInTab
+            case .jumpBackInSyncedTab:
+                return .jumpBackInSyncedTab
+            case .bookmark:
+                return .bookmark
+            case .pocket:
+                return .story
+            case .customizeHomepage:
+                return .customizeHomepage
+            default:
+                return nil
+            }
+        }
     }
 
-    func updateSnapshot(state: HomepageState, numberOfCellsPerRow: Int) {
+    func updateSnapshot(
+        state: HomepageState,
+        jumpBackInDisplayConfig: JumpBackInSectionLayoutConfiguration
+    ) {
         var snapshot = NSDiffableDataSourceSnapshot<HomeSection, HomeItem>()
 
         let textColor = state.wallpaperState.wallpaperConfiguration.textColor
@@ -73,14 +99,20 @@ final class HomepageDiffableDataSource:
             snapshot.appendItems([.messageCard(configuration)], toSection: .messageCard)
         }
 
-        if let topSites = getTopSites(with: state.topSitesState, and: textColor, numberOfCellsPerRow: numberOfCellsPerRow) {
+        if let (topSites, numberOfCellsPerRow) = getTopSites(with: state.topSitesState, and: textColor) {
             snapshot.appendSections([.topSites(numberOfCellsPerRow)])
             snapshot.appendItems(topSites, toSection: .topSites(numberOfCellsPerRow))
         }
 
-        if let tabs = getJumpBackInTabs(with: state.jumpBackInState) {
-            snapshot.appendSections([.jumpBackIn(textColor)])
-            snapshot.appendItems(tabs, toSection: .jumpBackIn(textColor))
+        // TODO: FXIOS-12566 - Should update with state instead of adding private method
+        if shouldShowSearchBar(with: state.windowUUID) {
+            snapshot.appendSections([.searchBar])
+            snapshot.appendItems([.searchBar], toSection: .searchBar)
+        }
+
+        if let (tabs, configuration) = getJumpBackInTabs(with: state.jumpBackInState, and: jumpBackInDisplayConfig) {
+            snapshot.appendSections([.jumpBackIn(textColor, configuration)])
+            snapshot.appendItems(tabs, toSection: .jumpBackIn(textColor, configuration))
         }
 
         if let bookmarks = getBookmarks(with: state.bookmarkState) {
@@ -93,18 +125,19 @@ final class HomepageDiffableDataSource:
             snapshot.appendItems(stories, toSection: .pocket(textColor))
         }
 
-        snapshot.appendSections([.customizeHomepage])
-        snapshot.appendItems([.customizeHomepage], toSection: .customizeHomepage)
+        if featureFlags.isFeatureEnabled(.hntCusomizationSection, checking: .buildOnly) {
+            snapshot.appendSections([.customizeHomepage])
+            snapshot.appendItems([.customizeHomepage], toSection: .customizeHomepage)
+        }
 
-        apply(snapshot, animatingDifferences: true)
+        apply(snapshot, animatingDifferences: false)
     }
 
     private func getPocketStories(
         with pocketState: PocketState
     ) -> [HomepageDiffableDataSource.HomeItem]? {
-        var stories: [HomeItem] = pocketState.pocketData.compactMap { .pocket($0) }
+        let stories: [HomeItem] = pocketState.pocketData.compactMap { .pocket($0) }
         guard pocketState.shouldShowSection, !stories.isEmpty else { return nil }
-        stories.append(.pocketDiscover(pocketState.pocketDiscoverItem))
         return stories
     }
 
@@ -115,32 +148,40 @@ final class HomepageDiffableDataSource:
     ///   - textColor: text color from wallpaper configuration
     private func getTopSites(
         with topSitesState: TopSitesSectionState,
-        and textColor: TextColor?,
-        numberOfCellsPerRow: Int
-    ) -> [HomepageDiffableDataSource.HomeItem]? {
+        and textColor: TextColor?
+    ) -> ([HomepageDiffableDataSource.HomeItem], Int)? {
         guard topSitesState.shouldShowSection else { return nil }
         let topSites: [HomeItem] = topSitesState.topSitesData.prefix(
-            topSitesState.numberOfRows * numberOfCellsPerRow
+            topSitesState.numberOfRows * topSitesState.numberOfTilesPerRow
         ).compactMap {
             .topSite($0, textColor)
         }
         guard !topSites.isEmpty else { return nil }
-        return topSites
+        return (topSites, topSitesState.numberOfTilesPerRow)
     }
 
     private func getJumpBackInTabs(
-        with jumpBackInSectionState: JumpBackInSectionState
-    ) -> [HomepageDiffableDataSource.HomeItem]? {
-        // TODO: FXIOS-11226 Show items or hide items depending user prefs / feature flag
-        // TODO: FXIOS-11224 Configure items to display based on device sizes
-        let maxItemsToDisplay = 1
-        var tabs: [HomeItem] = jumpBackInSectionState.jumpBackInTabs
-            .prefix(maxItemsToDisplay)
+        with state: JumpBackInSectionState,
+        and config: JumpBackInSectionLayoutConfiguration
+    ) -> ([HomepageDiffableDataSource.HomeItem], JumpBackInSectionLayoutConfiguration)? {
+        guard state.shouldShowSection else { return nil }
+        var updatedConfig = config
+        updatedConfig.hasSyncedTab = state.mostRecentSyncedTab != nil
+
+        var tabs: [HomeItem] = state.jumpBackInTabs
+            .prefix(updatedConfig.getMaxNumberOfLocalTabsLayout)
             .compactMap { .jumpBackIn($0) }
-        if let mostRecentSyncedTab = jumpBackInSectionState.mostRecentSyncedTab {
-            tabs.append(.jumpBackInSyncedTab(mostRecentSyncedTab))
+
+        // Determines if remote tab should appear first depending on device size
+        if let mostRecentSyncedTab = state.mostRecentSyncedTab {
+            if updatedConfig.layoutType == .compact {
+                tabs.append(.jumpBackInSyncedTab(mostRecentSyncedTab))
+            } else {
+                tabs.insert(.jumpBackInSyncedTab(mostRecentSyncedTab), at: 0)
+            }
         }
-        return tabs
+        guard !tabs.isEmpty else { return nil }
+        return (tabs, updatedConfig)
     }
 
     private func getBookmarks(
@@ -148,5 +189,25 @@ final class HomepageDiffableDataSource:
     ) -> [HomepageDiffableDataSource.HomeItem]? {
         guard state.shouldShowSection, !state.bookmarks.isEmpty else { return nil }
         return state.bookmarks.compactMap { .bookmark($0) }
+    }
+
+    private func shouldShowSearchBar(
+        with windowUUID: WindowUUID,
+        for device: UIUserInterfaceIdiom = UIDevice.current.userInterfaceIdiom,
+        and isLandscape: Bool = UIWindow.isLandscape
+    ) -> Bool {
+        let toolbarPosition = store.state.screenState(
+            ToolbarState.self,
+            for: .toolbar,
+            window: windowUUID
+        )?.toolbarPosition
+
+        let isHomepageSearchEnabled = featureFlags.isFeatureEnabled(.homepageSearchBar, checking: .buildOnly)
+        let isCompact = device == .phone && !isLandscape
+
+        guard toolbarPosition == .top, isHomepageSearchEnabled, isCompact else {
+            return false
+        }
+        return true
     }
 }

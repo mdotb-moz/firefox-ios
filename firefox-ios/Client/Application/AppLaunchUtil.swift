@@ -5,11 +5,11 @@
 import Common
 import Foundation
 import Shared
-import Storage
 import Account
 import Glean
+import MozillaAppServices
 
-class AppLaunchUtil {
+final class AppLaunchUtil {
     private var logger: Logger
 //    private var adjustHelper: AdjustHelper
     private var profile: Profile
@@ -36,13 +36,14 @@ class AppLaunchUtil {
 
         DefaultBrowserUtil().processUserDefaultState(isFirstRun: introScreenManager.shouldShowIntroScreen)
 
-        // Initialize the feature flag subsystem.
-        // Among other things, it toggles on and off Nimbus, Contile, Adjust.
-        // i.e. this must be run before initializing those systems.
-        LegacyFeatureFlagsManager.shared.initializeDeveloperFeatures(with: profile)
-
         // Need to get "settings.sendCrashReports" this way so that Sentry can be initialized before getting the Profile.
         let sendCrashReports = NSUserDefaultsPrefs(prefix: "profile").boolForKey(AppConstants.prefSendCrashReports) ?? true
+
+        if termsOfServiceManager.isAffectedUser {
+            logger.setup(sendCrashReports: sendCrashReports)
+            TelemetryWrapper.shared.setup(profile: profile)
+            TelemetryWrapper.shared.recordStartUpTelemetry()
+        }
 
         if termsOfServiceManager.isFeatureEnabled {
             // Two cases:
@@ -53,6 +54,10 @@ class AppLaunchUtil {
             if isTermsOfServiceAccepted {
                 TelemetryWrapper.shared.setup(profile: profile)
                 TelemetryWrapper.shared.recordStartUpTelemetry()
+            } else {
+                // If ToS are not accepted, we still need to setup the Contextual Identifier for
+                // the Unified Ads Sponsored tiles
+                TelemetryContextualIdentifier.setupContextId(isGleanMetricsAllowed: false)
             }
         } else {
             logger.setup(sendCrashReports: sendCrashReports)
@@ -63,7 +68,6 @@ class AppLaunchUtil {
         setUserAgent()
 
         KeyboardHelper.defaultHelper.startObserving()
-        LegacyDynamicFontHelper.defaultHelper.startObserving()
 
         setMenuItems()
 
@@ -77,6 +81,9 @@ class AppLaunchUtil {
                                                                                 checking: .buildOnly),
                               forKey: PrefsKeys.IsBookmarksRefactorEnabled)
 
+        // Initialize app services ( including NSS ). Must be called before any other calls to rust components.
+        MozillaAppServices.initialize()
+
         // Start initializing the Nimbus SDK. This should be done after Glean
         // has been started.
         initializeExperiments()
@@ -85,6 +92,9 @@ class AppLaunchUtil {
         DispatchQueue.global().async {
             self.runAppServicesHistoryMigration()
         }
+
+        // Save toolbar position to user prefs
+        SearchBarLocationSaver().saveUserSearchBarLocation(profile: profile)
 
         NotificationCenter.default.addObserver(
             forName: .FSReadingListAddReadingListItem,
@@ -116,9 +126,6 @@ class AppLaunchUtil {
                    level: .debug,
                    category: .setup)
 
-        logger.log("Prefs for migration is \(String(describing: profile.prefs.boolForKey(PrefsKeys.TabMigrationKey)))",
-                   level: .debug,
-                   category: .tabs)
         AppEventQueue.signal(event: .preLaunchDependenciesComplete)
     }
 
@@ -168,56 +175,52 @@ class AppLaunchUtil {
         // increase session count value
         profile.prefs.setInt(sessionCount + 1, forKey: PrefsKeys.Session.Count)
         UserDefaults.standard.set(Date.now(), forKey: PrefsKeys.Session.Last)
-        let conversionMetrics = UserConversionMetrics()
-        conversionMetrics.didStartNewSession()
     }
 
     // MARK: - Application Services History Migration
 
     private func runAppServicesHistoryMigration() {
+        let isFirstRun = introScreenManager.shouldShowIntroScreen
+
+        // If this is a first run, there won't be history to migrate since we are far past v110
+        guard !isFirstRun else {
+            // Mark migration as succeeded and return early
+            UserDefaults.standard.setValue(true, forKey: PrefsKeys.PlacesHistoryMigrationSucceeded)
+            return
+        }
+
         let browserProfile = self.profile as? BrowserProfile
 
         let migrationSucceeded = UserDefaults.standard.bool(forKey: PrefsKeys.PlacesHistoryMigrationSucceeded)
         let migrationAttemptNumber = UserDefaults.standard.integer(forKey: PrefsKeys.HistoryMigrationAttemptNumber)
         UserDefaults.standard.setValue(migrationAttemptNumber + 1, forKey: PrefsKeys.HistoryMigrationAttemptNumber)
+
         if !migrationSucceeded && migrationAttemptNumber < AppConstants.maxHistoryMigrationAttempt {
-            logger.log("Migrating Application services history",
+            HistoryTelemetry().attemptedApplicationServicesMigration()
+            logger.log("Migrating Application Services history",
                        level: .info,
                        category: .sync)
-            let id = GleanMetrics.PlacesHistoryMigration.duration.start()
-            // We mark that the migration started
-            // this will help us identify how often the migration starts, but never ends
-            // additionally, we have a separate metric for error rates
-            GleanMetrics.PlacesHistoryMigration.migrationEndedRate.addToNumerator(1)
-            GleanMetrics.PlacesHistoryMigration.migrationErrorRate.addToNumerator(1)
-            browserProfile?.migrateHistoryToPlaces(
-            callback: { result in
-                self.logger.log("Successful Migration took \(result.totalDuration / 1000) seconds",
-                                level: .info,
-                                category: .sync)
-                // We record various success metrics here
-                GleanMetrics.PlacesHistoryMigration.duration.stopAndAccumulate(id)
-                GleanMetrics.PlacesHistoryMigration.numMigrated.set(Int64(result.numSucceeded))
-                self.logger.log("Migrated \(result.numSucceeded) entries",
-                                level: .info,
-                                category: .sync)
-                GleanMetrics.PlacesHistoryMigration.numToMigrate.set(Int64(result.numTotal))
-                GleanMetrics.PlacesHistoryMigration.migrationEndedRate.addToDenominator(1)
-                UserDefaults.standard.setValue(true, forKey: PrefsKeys.PlacesHistoryMigrationSucceeded)
-                NotificationCenter.default.post(name: .TopSitesUpdated, object: nil)
-            },
-            errCallback: { err in
-                let errDescription = err?.localizedDescription ?? "Unknown error during History migration"
-                self.logger.log("Migration failed with \(errDescription)",
-                                level: .warning,
-                                category: .sync)
 
-                GleanMetrics.PlacesHistoryMigration.duration.cancel(id)
-                GleanMetrics.PlacesHistoryMigration.migrationEndedRate.addToDenominator(1)
-                GleanMetrics.PlacesHistoryMigration.migrationErrorRate.addToDenominator(1)
-            })
+            browserProfile?.migrateHistoryToPlaces(
+                callback: { result in
+                    self.logger.log("Successfully migrated history",
+                                    level: .info,
+                                    category: .sync,
+                                    extra: ["durationSeconds": "\(result.totalDuration / 1000)"])
+
+                    UserDefaults.standard.setValue(true, forKey: PrefsKeys.PlacesHistoryMigrationSucceeded)
+                    NotificationCenter.default.post(name: .TopSitesUpdated, object: nil)
+                },
+                errCallback: { err in
+                    let errDescription = err?.localizedDescription ?? "Unknown error during History migration"
+                    self.logger.log("History migration failed",
+                                    level: .fatal,
+                                    category: .sync,
+                                    extra: ["error": errDescription])
+                }
+            )
         } else {
-            self.logger.log("History Migration skipped",
+            self.logger.log("History migration skipped",
                             level: .debug,
                             category: .sync)
         }

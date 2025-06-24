@@ -6,6 +6,7 @@ import XCTest
 import WebKit
 import Common
 import Shared
+
 @testable import Client
 
 final class TabScrollControllerTests: XCTestCase {
@@ -40,7 +41,7 @@ final class TabScrollControllerTests: XCTestCase {
         mockGesture.gestureTranslation = CGPoint(x: 0, y: 100)
         subject.handlePan(mockGesture)
 
-        XCTAssertEqual(subject.toolbarState, TabScrollingController.ToolbarState.collapsed)
+        XCTAssertEqual(subject.toolbarState, TabScrollController.ToolbarState.collapsed)
     }
 
     func testHandlePan_ScrollingDown() {
@@ -50,7 +51,7 @@ final class TabScrollControllerTests: XCTestCase {
         mockGesture.gestureTranslation = CGPoint(x: 0, y: -100)
         subject.handlePan(mockGesture)
 
-        XCTAssertEqual(subject.toolbarState, TabScrollingController.ToolbarState.visible)
+        XCTAssertEqual(subject.toolbarState, TabScrollController.ToolbarState.visible)
     }
 
     func testShowToolbar_AfterHidingWithScroll() {
@@ -63,7 +64,7 @@ final class TabScrollControllerTests: XCTestCase {
 
         // Force call to showToolbars like clicking on top bar area
         subject.showToolbars(animated: true)
-        XCTAssertEqual(subject.toolbarState, TabScrollingController.ToolbarState.visible)
+        XCTAssertEqual(subject.toolbarState, TabScrollController.ToolbarState.visible)
         XCTAssertEqual(subject.header?.alpha, 1)
     }
 
@@ -76,7 +77,7 @@ final class TabScrollControllerTests: XCTestCase {
         subject.handlePan(mockGesture)
         subject.scrollViewDidEndDragging(tab.webView!.scrollView, willDecelerate: true)
 
-        XCTAssertEqual(subject.toolbarState, TabScrollingController.ToolbarState.visible)
+        XCTAssertEqual(subject.toolbarState, TabScrollController.ToolbarState.visible)
         XCTAssertEqual(subject.header?.alpha, 1)
     }
 
@@ -89,7 +90,7 @@ final class TabScrollControllerTests: XCTestCase {
         subject.handlePan(mockGesture)
         subject.scrollViewDidEndDragging(tab.webView!.scrollView, willDecelerate: true)
 
-        XCTAssertEqual(subject.toolbarState, TabScrollingController.ToolbarState.collapsed)
+        XCTAssertEqual(subject.toolbarState, TabScrollController.ToolbarState.collapsed)
     }
 
     func testDidSetTab_addsPullRefreshViewToScrollView() {
@@ -104,33 +105,14 @@ final class TabScrollControllerTests: XCTestCase {
         XCTAssertNil(tab.webView?.scrollView.refreshControl)
     }
 
-    func testDidSetTab_addsUIRefreshControllToScrollView() {
-        let subject = createSubject(isPullRefreshRefactorEnabled: false)
-        setupTabScroll(with: subject)
-
-        let pullRefreshView = tab.webView?.scrollView.subviews.first(where: {
-            $0 is PullRefreshView
-        })
-
-        XCTAssertNotNil(tab.webView?.scrollView.refreshControl)
-        XCTAssertNil(pullRefreshView)
-    }
-
-    func testDidSetTab_setsTabOnLoadingClosure_whenPullRefreshFeatureEnabled() {
+    func testDidSetTab_setsTabOnLoadingClosure() {
         let subject = createSubject()
         setupTabScroll(with: subject)
 
-        XCTAssertNotNil(tab.onLoading)
+        XCTAssertNotNil(tab.onWebViewLoadingStateChanged)
     }
 
-    func testDidSetTab_tabHasNilOnLoadingClosure_whenPullRefreshFeatureDisabled() {
-        let subject = createSubject(isPullRefreshRefactorEnabled: false)
-        setupTabScroll(with: subject)
-
-        XCTAssertNil(tab.onLoading)
-    }
-
-    func testScrollViewWillBeginZooming_removesPullRefresh_whenPullRefreshFeatureEnabled() throws {
+    func testScrollViewWillBeginZooming_removesPullRefresh() throws {
         let subject = createSubject()
         setupTabScroll(with: subject)
 
@@ -141,17 +123,7 @@ final class TabScrollControllerTests: XCTestCase {
         XCTAssertNil(pullRefresh)
     }
 
-    func testScrollViewWillBeginZooming_removesUIRefreshControll_whenPullRefreshFeatureDisabled() throws {
-        let subject = createSubject(isPullRefreshRefactorEnabled: false)
-        setupTabScroll(with: subject)
-
-        let scrollView = try XCTUnwrap(tab.webView?.scrollView)
-        subject.scrollViewWillBeginZooming(scrollView, with: nil)
-
-        XCTAssertNil(scrollView.refreshControl)
-    }
-
-    func testScrollViewDidEndZooming_addsPullRefresh_whenPullRefreshFeatureEnabled() throws {
+    func testScrollViewDidEndZooming_addsPullRefresh() throws {
         let subject = createSubject()
         setupTabScroll(with: subject)
 
@@ -163,28 +135,18 @@ final class TabScrollControllerTests: XCTestCase {
         XCTAssertNotNil(pullRefresh)
     }
 
-    func testScrollViewDidEndZooming_addsUIRefreshControll_whenPullRefreshFeatureDisabled() throws {
-        let subject = createSubject(isPullRefreshRefactorEnabled: false)
-        setupTabScroll(with: subject)
-
-        let scrollView = try XCTUnwrap(tab.webView?.scrollView)
-        subject.scrollViewDidEndZooming(scrollView, with: nil, atScale: 0)
-
-        XCTAssertNotNil(scrollView.refreshControl)
-    }
-
-    private func setupTabScroll(with subject: TabScrollingController) {
+    private func setupTabScroll(with subject: TabScrollController) {
         tab.createWebview(configuration: .init())
+        tab.webView?.scrollView.frame.size = CGSize(width: 200, height: 2000)
         tab.webView?.scrollView.contentSize = CGSize(width: 200, height: 2000)
         tab.webView?.scrollView.delegate = subject
         subject.tab = tab
         subject.header = header
     }
 
-    private func createSubject(isPullRefreshRefactorEnabled: Bool = true) -> TabScrollingController {
-        return TabScrollingController(
-            windowUUID: .XCTestDefaultUUID,
-            isPullToRefreshRefactorEnabled: isPullRefreshRefactorEnabled
-        )
+    private func createSubject() -> TabScrollController {
+        let subject = TabScrollController(windowUUID: .XCTestDefaultUUID)
+        trackForMemoryLeaks(subject)
+        return subject
     }
 }

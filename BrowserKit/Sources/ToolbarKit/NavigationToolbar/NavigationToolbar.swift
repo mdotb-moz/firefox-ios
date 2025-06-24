@@ -6,5 +6,8 @@ import Foundation
 
 /// Protocol representing an navigation toolbar.
 public protocol NavigationToolbar {
-    func configure(config: NavigationToolbarConfiguration, toolbarDelegate: BrowserNavigationToolbarDelegate)
+    func configure(
+        config: NavigationToolbarConfiguration,
+        toolbarDelegate: BrowserNavigationToolbarDelegate
+    )
 }

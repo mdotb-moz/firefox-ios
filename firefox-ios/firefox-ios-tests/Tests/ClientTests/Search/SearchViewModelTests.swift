@@ -3,7 +3,6 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/
 
 import Foundation
-import Shared
 import Storage
 import XCTest
 
@@ -46,6 +45,38 @@ final class SearchViewModelTests: XCTestCase {
     override func tearDown() {
         super.tearDown()
         profile = nil
+    }
+
+    func testHasFirefoxSuggestionsWhenAllConditionsAreFalse() {
+        let subject = createSubject()
+        searchEnginesManager.shouldShowBookmarksSuggestions = false
+        searchEnginesManager.shouldShowBrowsingHistorySuggestions = false
+        subject.filteredOpenedTabs = []
+        subject.filteredRemoteClientTabs = []
+        searchEnginesManager.shouldShowSyncedTabsSuggestions = false
+        subject.firefoxSuggestions = []
+        searchEnginesManager.shouldShowFirefoxSuggestions = false
+        searchEnginesManager.shouldShowSponsoredSuggestions = false
+        XCTAssertFalse(subject.hasFirefoxSuggestions)
+    }
+
+    func testHasFirefoxSuggestionsWhenFirefoxSuggestionsExistButShouldNotShowIsFalse() {
+        let subject = createSubject()
+        subject.firefoxSuggestions = [
+            RustFirefoxSuggestion(title: "Test", url: URL(string: "https://google.com")!, isSponsored: true, iconImage: nil)
+        ]
+        searchEnginesManager.shouldShowFirefoxSuggestions = false
+        searchEnginesManager.shouldShowSponsoredSuggestions = false
+        XCTAssertFalse(subject.hasFirefoxSuggestions)
+    }
+
+    func testHasFirefoxSuggestionsWhenFirefoxSuggestionsExistAndShouldShowIsTrue() {
+        let subject = createSubject()
+        subject.firefoxSuggestions = [
+            RustFirefoxSuggestion(title: "Test", url: URL(string: "https://google.com")!, isSponsored: true, iconImage: nil)
+        ]
+        searchEnginesManager.shouldShowFirefoxSuggestions = true
+        XCTAssertTrue(subject.hasFirefoxSuggestions)
     }
 
     func testFirefoxSuggestionReturnsNoSuggestions() async throws {

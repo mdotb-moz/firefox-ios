@@ -132,7 +132,7 @@ class PasswordManagerListViewController: SensitiveViewController, Themeable {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        loadLogins()
+        loadLogins(searchController.searchBar.text)
     }
 
     func applyTheme() {
@@ -166,12 +166,6 @@ class PasswordManagerListViewController: SensitiveViewController, Themeable {
     @objc
     func dismissLogins() {
         dismiss(animated: true)
-    }
-
-    func showToast() {
-        SimpleToast().showAlertWithText(.LoginListDeleteToast,
-                                        bottomContainer: view,
-                                        theme: themeManager.getCurrentTheme(for: windowUUID))
     }
 
     lazy var editButton = UIBarButtonItem(barButtonSystemItem: .edit,
@@ -334,7 +328,6 @@ private extension PasswordManagerListViewController {
                         self.cancelSelection()
                         self.loadLogins()
                         self.sendLoginsDeletedTelemetry()
-                        self.showToast()
                     }
                 }
             }, hasSyncedLogins: yes.successValue ?? true)

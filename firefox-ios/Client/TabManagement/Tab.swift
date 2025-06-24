@@ -8,8 +8,12 @@ import Storage
 import Shared
 import SiteImageView
 import WebKit
+import WebEngine
+import TabDataStore
 
+#if DEBUG
 private var debugTabCount = 0
+#endif
 
 func mostRecentTab(inTabs tabs: [Tab]) -> Tab? {
     guard var recent = tabs.first else {
@@ -80,10 +84,6 @@ class Tab: NSObject, ThemeApplicable, FeatureFlaggable, ShareTab {
         }
     }
 
-    var isInactiveTabsEnabled: Bool {
-        return featureFlags.isFeatureEnabled(.inactiveTabs, checking: .buildAndUser)
-    }
-
     var isNormal: Bool {
         return !isPrivate
     }
@@ -105,11 +105,6 @@ class Tab: NSObject, ThemeApplicable, FeatureFlaggable, ShareTab {
     var tabState: TabState {
         return TabState(isPrivate: _isPrivate, url: url, title: displayTitle)
     }
-
-    var timerPerWebsite: [String: StopWatchTimer] = [:]
-
-    // Tab Groups
-    var metadataManager: LegacyTabMetadataManager?
 
     // PageMetadata is derived from the page content itself, and as such lags behind the
     // rest of the tab.
@@ -149,8 +144,6 @@ class Tab: NSObject, ThemeApplicable, FeatureFlaggable, ShareTab {
     var shouldScrollToTop = false
     var isFindInPageMode = false
 
-    private var logger: Logger
-
     // To check if current URL is the starting page i.e. either blank page or internal page like topsites
     var isURLStartingPage: Bool {
         guard url != nil else { return true }
@@ -161,20 +154,23 @@ class Tab: NSObject, ThemeApplicable, FeatureFlaggable, ShareTab {
     }
 
     var canonicalURL: URL? {
+        if isPDFRefactorEnabled, temporaryDocument?.isDownloading ?? false {
+            return url
+        }
         if let string = pageMetadata?.siteURL,
-           let siteURL = URL(string: string, invalidCharacters: false) {
+           let siteURL = URL(string: string) {
             // If the canonical URL from the page metadata doesn't contain the
             // "#" fragment, check if the tab's URL has a fragment and if so,
             // append it to the canonical URL.
             if siteURL.fragment == nil,
                let fragment = self.url?.fragment,
-               let siteURLWithFragment = URL(string: "\(string)#\(fragment)", invalidCharacters: false) {
+               let siteURLWithFragment = URL(string: "\(string)#\(fragment)") {
                 return siteURLWithFragment
             }
 
             return siteURL
         }
-        return self.url
+        return url
     }
 
     var loading: Bool {
@@ -185,18 +181,18 @@ class Tab: NSObject, ThemeApplicable, FeatureFlaggable, ShareTab {
         return webView?.estimatedProgress ?? 0
     }
 
-    var backList: [WKBackForwardListItem]? {
-        return webView?.backForwardList.backList
-    }
-
-    var forwardList: [WKBackForwardListItem]? {
-        return webView?.backForwardList.forwardList
+    var backForwardList: BackForwardList? {
+        guard let backForwardList = webView?.backForwardList else { return nil }
+        return TabBackForwardList(
+            backForwardList: backForwardList,
+            temporaryDocumentSession: temporaryDocumentsSession
+        )
     }
 
     var historyList: [URL] {
-        func listToUrl(_ item: WKBackForwardListItem) -> URL { return item.url }
+        func listToUrl(_ item: BackForwardListItem) -> URL { return item.url }
 
-        var historyUrls = self.backList?.map(listToUrl) ?? [URL]()
+        var historyUrls = self.backForwardList?.backList.map(listToUrl) ?? [URL]()
         if let url = url {
             historyUrls.append(url)
         }
@@ -216,6 +212,11 @@ class Tab: NSObject, ThemeApplicable, FeatureFlaggable, ShareTab {
     var displayTitle: String {
         if self.isFxHomeTab {
             return .LegacyAppMenu.AppMenuOpenHomePageTitleString
+        }
+
+        if let url, url.isFileURL {
+            // return the file name
+            return url.lastPathComponent
         }
 
         if let lastTitle = lastTitle, !lastTitle.isEmpty {
@@ -280,7 +281,7 @@ class Tab: NSObject, ThemeApplicable, FeatureFlaggable, ShareTab {
         didSet {
             guard let url = url,
                   let faviconURLString = faviconURL,
-                  let faviconUrl = URL(string: faviconURLString, invalidCharacters: false)
+                  let faviconUrl = URL(string: faviconURLString)
             else { return }
             faviconHelper.cacheFaviconURL(
                 siteURL: url,
@@ -292,8 +293,11 @@ class Tab: NSObject, ThemeApplicable, FeatureFlaggable, ShareTab {
     var pendingScreenshot = false
     var url: URL? {
         didSet {
+            if isPDFRefactorEnabled, let _url = url, let sourceURL = temporaryDocumentsSession[_url] {
+                url = sourceURL
+            }
             if let _url = url, let internalUrl = InternalURL(_url), internalUrl.isAuthorized {
-                url = URL(string: internalUrl.stripAuthorization, invalidCharacters: false)
+                url = URL(string: internalUrl.stripAuthorization)
             }
         }
     }
@@ -315,11 +319,6 @@ class Tab: NSObject, ThemeApplicable, FeatureFlaggable, ShareTab {
            let internalUrl = InternalURL(url),
            internalUrl.isAboutHomeURL {
             return true
-        }
-        // TODO: Find a new home for this FXIOS-8527
-        // A computed variable should not be making view level changes
-        ensureMainThread {
-            self.setZoomLevelforDomain()
         }
         return false
     }
@@ -370,6 +369,7 @@ class Tab: NSObject, ThemeApplicable, FeatureFlaggable, ShareTab {
     var nightMode: Bool {
         didSet {
             guard nightMode != oldValue else { return }
+            webView?.isOpaque = !nightMode
             webView?.evaluateJavascriptInCustomContentWorld(
                 NightModeHelper.jsCallbackBuilder(nightMode),
                 in: .world(name: NightModeHelper.name())
@@ -404,35 +404,11 @@ class Tab: NSObject, ThemeApplicable, FeatureFlaggable, ShareTab {
         return false
     }
 
-    fileprivate(set) var pageZoom: CGFloat = 1.0 {
+    var pageZoom: CGFloat = 1.0 {
         didSet {
             webView?.setValue(pageZoom, forKey: "viewScale")
         }
     }
-
-    fileprivate(set) var screenshot: UIImage?
-
-    // If this tab has been opened from another, its parent will point to the tab from which it was opened
-    weak var parent: Tab?
-
-    private var contentScriptManager = TabContentScriptManager()
-
-    private var configuration: WKWebViewConfiguration?
-
-    /// Any time a tab tries to make requests to display a Javascript Alert and we are not the active
-    /// tab instance, queue it for later until we become foregrounded.
-    private var alertQueue = [JSAlertInfo]()
-    private var newAlertQueue = [NewJSAlertInfo]()
-
-    var onLoading: VoidReturnCallback?
-    private var webViewLoadingObserver: NSKeyValueObservation?
-    private var downloadedTemporaryDocs = [URL]()
-
-    private var isPDFRefactorEnabled: Bool {
-        return featureFlags.isFeatureEnabled(.pdfRefactor, checking: .buildOnly)
-    }
-
-    var profile: Profile
 
     /// Returns true if this tab is considered inactive (has not been executed for more than a specific number of days).
     /// Note: When `FasterInactiveTabsOverride` is enabled, tabs become inactive very quickly for testing purposes.
@@ -466,25 +442,66 @@ class Tab: NSObject, ThemeApplicable, FeatureFlaggable, ShareTab {
         return !isInactive
     }
 
+    fileprivate(set) var screenshot: UIImage?
+
+    // If this tab has been opened from another, its parent will point to the tab from which it was opened
+    weak var parent: Tab?
+
+    private var contentScriptManager = TabContentScriptManager()
+
+    private var configuration: WKWebViewConfiguration?
+
+    /// Any time a tab tries to make requests to display a Javascript Alert and we are not the active
+    /// tab instance, queue it for later until we become foregrounded.
+    private var alertQueue = [JSAlertInfo]()
+
+    var onWebViewLoadingStateChanged: VoidReturnCallback?
+    private var webViewLoadingObserver: NSKeyValueObservation?
+
+    private var temporaryDocumentsSession: TemporaryDocumentSession = [:]
+
+    // MARK: - Feature flags
+
+    private var isPDFRefactorEnabled: Bool {
+        return featureFlags.isFeatureEnabled(.pdfRefactor, checking: .buildOnly)
+    }
+
+    var isInactiveTabsEnabled: Bool {
+        return featureFlags.isFeatureEnabled(.inactiveTabs, checking: .buildAndUser)
+    }
+
+    // MARK: - Dependencies
+    var profile: Profile
+    private let fileManager: FileManagerProtocol
+    private let backgroundDispatchQueue: DispatchQueueInterface
+    private var logger: Logger
+    private let documentLogger: DocumentLogger
+
     init(profile: Profile,
          isPrivate: Bool = false,
          windowUUID: WindowUUID,
          faviconHelper: SiteImageHandler = DefaultSiteImageHandler.factory(),
          tabCreatedTime: Date = Date(),
-         logger: Logger = DefaultLogger.shared) {
+         backgroundDispatchQueue: DispatchQueueInterface = DispatchQueue.global(qos: .background),
+         fileManager: FileManagerProtocol = FileManager.default,
+         logger: Logger = DefaultLogger.shared,
+         documentLogger: DocumentLogger = AppContainer.shared.resolve()) {
         self.nightMode = false
         self.windowUUID = windowUUID
         self.noImageMode = false
         self.profile = profile
-        self.metadataManager = LegacyTabMetadataManager(metadataObserver: profile.places)
         self.faviconHelper = faviconHelper
         self.lastExecutedTime = tabCreatedTime.toTimestamp()
         self.firstCreatedTime = tabCreatedTime.toTimestamp()
+        self.fileManager = fileManager
         self.logger = logger
+        self.documentLogger = documentLogger
+        self.backgroundDispatchQueue = backgroundDispatchQueue
         super.init()
         self.isPrivate = isPrivate
-
+#if DEBUG
         debugTabCount += 1
+#endif
 
         TelemetryWrapper.recordEvent(
             category: .action,
@@ -586,7 +603,7 @@ class Tab: NSObject, ThemeApplicable, FeatureFlaggable, ShareTab {
 
             tabDelegate?.tab(self, didCreateWebView: webView)
             webViewLoadingObserver = webView.observe(\.isLoading) { [weak self] _, _ in
-                self?.onLoading?()
+                self?.onWebViewLoadingStateChanged?()
             }
         }
     }
@@ -614,8 +631,8 @@ class Tab: NSObject, ThemeApplicable, FeatureFlaggable, ShareTab {
         webView?.removeObserver(self, forKeyPath: KVOConstants.hasOnlySecureContent.rawValue)
         webView?.navigationDelegate = nil
 
-        debugTabCount -= 1
 #if DEBUG
+        debugTabCount -= 1
         guard let appDelegate = UIApplication.shared.delegate as? AppDelegate else { return }
         func checkTabCount(failures: Int) {
             // Need delay for pool to drain.
@@ -686,6 +703,9 @@ class Tab: NSObject, ThemeApplicable, FeatureFlaggable, ShareTab {
 
     @discardableResult
     func loadRequest(_ request: URLRequest) -> WKNavigation? {
+        if isPDFRefactorEnabled {
+            cancelTemporaryDocumentDownload(forceReload: false)
+        }
         if let webView = webView {
             // Convert about:reader?url=http://example.com URLs to local ReaderMode URLs
             if let url = request.url,
@@ -708,9 +728,17 @@ class Tab: NSObject, ThemeApplicable, FeatureFlaggable, ShareTab {
 
     func stop() {
         webView?.stopLoading()
+        if isPDFRefactorEnabled {
+            cancelTemporaryDocumentDownload()
+        }
     }
 
     func reload(bypassCache: Bool = false) {
+        if isPDFRefactorEnabled {
+            if cancelTemporaryDocumentDownload() {
+                return
+            }
+        }
         // If the current page is an error page, and the reload button is tapped, load the original URL
         if let url = webView?.url, let internalUrl = InternalURL(url), let page = internalUrl.originalURLFromErrorPage {
             let request = URLRequest(url: page, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData)
@@ -751,55 +779,6 @@ class Tab: NSObject, ThemeApplicable, FeatureFlaggable, ShareTab {
     @objc
     func reloadPage() {
         reload()
-    }
-
-    @objc
-    func zoomIn() {
-        switch pageZoom {
-        case 0.75:
-            pageZoom = 0.9
-        case 0.9:
-            pageZoom = 1.0
-        case 1.0:
-            pageZoom = 1.10
-        case 1.10:
-            pageZoom = 1.25
-        case 2.0:
-            return
-        default:
-            pageZoom += 0.25
-        }
-    }
-
-    @objc
-    func zoomOut() {
-        switch pageZoom {
-        case 0.5:
-            return
-        case 0.9:
-            pageZoom = 0.75
-        case 1.0:
-            pageZoom = 0.9
-        case 1.10:
-            pageZoom = 1.0
-        case 1.25:
-            pageZoom = 1.10
-        default:
-            pageZoom -= 0.25
-        }
-    }
-
-    func resetZoom() {
-        pageZoom = 1.0
-    }
-
-    func setZoomLevelforDomain() {
-        if let host = url?.host,
-           let domainZoomLevel = ZoomLevelStore.shared.findZoomLevel(forDomain: host) {
-            pageZoom = domainZoomLevel.zoomLevel
-        } else {
-            resetZoom()
-        }
     }
 
     func addContentScript(_ helper: TabContentScript, name: String) {
@@ -864,6 +843,14 @@ class Tab: NSObject, ThemeApplicable, FeatureFlaggable, ShareTab {
         TabEvent.post(.didToggleDesktopMode, for: self)
     }
 
+    func cancelQueuedAlerts() {
+        alertQueue.forEach { alert in
+            alert.cancel()
+        }
+    }
+
+    /// Queues a JS Alert for later display
+    /// Do not call completionHandler until the alert is displayed and dismissed
     func queueJavascriptAlertPrompt(_ alert: JSAlertInfo) {
         alertQueue.append(alert)
     }
@@ -873,25 +860,8 @@ class Tab: NSObject, ThemeApplicable, FeatureFlaggable, ShareTab {
         return alertQueue.removeFirst()
     }
 
-    func cancelQueuedAlerts() {
-        newAlertQueue.forEach { alert in
-            alert.cancel()
-        }
-    }
-
-    /// Queues a JS Alert for later display
-    /// Do not call completionHandler until the alert is displayed and dismissed
-    func newQueueJavascriptAlertPrompt(_ alert: NewJSAlertInfo) {
-        newAlertQueue.append(alert)
-    }
-
-    func newDequeueJavascriptAlertPrompt() -> NewJSAlertInfo? {
-        guard !newAlertQueue.isEmpty else { return nil }
-        return newAlertQueue.removeFirst()
-    }
-
     func hasJavascriptAlertPrompt() -> Bool {
-        return !newAlertQueue.isEmpty
+        return !alertQueue.isEmpty
     }
 
     override func observeValue(
@@ -908,7 +878,7 @@ class Tab: NSObject, ThemeApplicable, FeatureFlaggable, ShareTab {
 
         if let title = self.webView?.title, !title.isEmpty,
            path == KVOConstants.title.rawValue {
-            metadataManager?.updateObservationTitle(title)
+            // `Tab.toRemoteTab` was added for FXIOS-8241
             _ = Tab.toRemoteTab(self, inactive: false)
         }
     }
@@ -934,6 +904,11 @@ class Tab: NSObject, ThemeApplicable, FeatureFlaggable, ShareTab {
     func applyTheme(theme: Theme) {
         UITextField.appearance().keyboardAppearance = theme.type.keyboardAppearence(isPrivate: isPrivate)
         webView?.applyTheme(theme: theme)
+        /// Configures the web view's background to prevent a white flash during initial load in night mode.
+        /// Note: Background colors are only visible when `isOpaque` is false — setting them while it's true has no effect.
+        webView?.backgroundColor =  theme.colors.layer1
+        webView?.scrollView.backgroundColor = theme.colors.layer1
+        webView?.isOpaque = !nightMode
         webView?.underPageBackgroundColor = nightMode ? .black : nil
     }
 
@@ -958,42 +933,107 @@ class Tab: NSObject, ThemeApplicable, FeatureFlaggable, ShareTab {
 
     // MARK: - Temporary Document handling - PDF Refactor
 
-    /// Returns true if the download was cancelled
+    /// Retrieves the session cookies attached to the current `WKWebView` managed by the `Tab`
+    func getSessionCookies(_ completion: @escaping ([HTTPCookie]) -> Void) {
+        webView?.configuration.websiteDataStore.httpCookieStore.getAllCookies(completion)
+    }
+
+    /// Returns true if the download was cancelled.
+    ///
+    /// `forceReload` forces the reload of the page when a document is downloading.
+    ///  After download cancellation reload the page to ensure clean state.
     @discardableResult
-    private func cancelTemporaryDocumentDownload() -> Bool {
+    private func cancelTemporaryDocumentDownload(forceReload: Bool = true) -> Bool {
         guard let temporaryDocument else { return false }
-
+        self.temporaryDocument = nil
         if temporaryDocument.isDownloading {
-            temporaryDocument.invalidateSession()
-            self.temporaryDocument = nil
-
-            webView?.removeDocumentLoadingView()
+            temporaryDocument.cancelDownload()
+            if let sourceURL = temporaryDocument.sourceURL {
+                documentLogger.remove(url: sourceURL)
+            }
+            if forceReload {
+                // if the webView's url is the home page then bypass cache so to reload the homepage
+                // Otherwise the webView is restored causing the PDF to be reloaded again.
+                let isInternalURL = InternalURL(webView?.url) != nil
+                reload(bypassCache: isInternalURL)
+            }
             return true
         }
         return false
     }
 
     private func deleteDownloadedDocuments() {
-        let docsURL = downloadedTemporaryDocs
+        let docsURL = temporaryDocumentsSession
         guard !docsURL.isEmpty else { return }
-        DispatchQueue.global(qos: .background).async {
+        backgroundDispatchQueue.async { [fileManager] in
             docsURL.forEach { url in
-                try? FileManager.default.removeItem(at: url)
+                try? fileManager.removeItem(at: url.key)
             }
         }
     }
 
-    func canLoadDocumentRequest(_ request: URLRequest) -> Bool {
+    func shouldDownloadDocument(_ request: URLRequest) -> Bool {
+        if let url = request.url, url.isFileURL, temporaryDocumentsSession[url] != nil {
+            let fileExists = fileManager.fileExists(atPath: url.path)
+            // Add a temporary document when the request is pointing to a document that was previously viewed.
+            // This is needed since temporary document is removed when navigating to any website and thus it needs
+            // to be restored, otherwise the share sheet will try to share a link and not the actual doc.
+            addTemporaryDocumentIfNeeded(request)
+            return !fileExists
+        }
         return temporaryDocument?.canDownload(request: request) ?? true
+    }
+
+    private func addTemporaryDocumentIfNeeded(_ request: URLRequest) {
+        guard temporaryDocument == nil else { return }
+        let mimeType = MIMEType.mimeTypeFromFileExtension(request.url?.pathExtension ?? "")
+        temporaryDocument = DefaultTemporaryDocument(filename: request.url?.lastPathComponent,
+                                                     request: request,
+                                                     mimeType: mimeType)
     }
 
     func enqueueDocument(_ document: TemporaryDocument) {
         temporaryDocument = document
+
         temporaryDocument?.download { [weak self] url in
             guard let url else { return }
-            self?.webView?.load(URLRequest(url: url))
-            self?.downloadedTemporaryDocs.append(url)
+
+            // Prevent the WebView to load a new item so it doesn't add a new entry to the back and forward list.
+            if let item = self?.backForwardList?.firstItem(with: url) as? WKBackForwardListItem {
+                self?.webView?.go(to: item)
+            } else {
+                self?.webView?.loadFileURL(url, allowingReadAccessTo: url)
+            }
+
+            // Don't add a source URL if it is a local one. Thats happen when reloading the PDF content
+            guard let sourceURL = document.sourceURL, document.sourceURL?.isFileURL == false else { return }
+            self?.temporaryDocumentsSession[url] = sourceURL
+            self?.documentLogger.registerDownloadFinish(url: sourceURL)
         }
+    }
+
+    func pauseDocumentDownload() {
+        temporaryDocument?.pauseDownload()
+    }
+
+    func resumeDocumentDownload() {
+        temporaryDocument?.resumeDownload()
+    }
+
+    func cancelDocumentDownload() {
+        temporaryDocument?.cancelDownload()
+    }
+
+    func isDownloadingDocument() -> Bool {
+        return temporaryDocument?.isDownloading ?? false
+    }
+
+    func getTemporaryDocumentsSession() -> TemporaryDocumentSession {
+        return temporaryDocumentsSession
+    }
+
+    func restoreTemporaryDocumentSession(_ session: TemporaryDocumentSession) {
+        temporaryDocumentsSession = session
     }
 }
 
@@ -1021,7 +1061,6 @@ extension Tab: UIGestureRecognizerDelegate {
     @objc
     func handleEdgeSwipeTabNavigation(_ sender: UIScreenEdgePanGestureRecognizer) {
         guard let webView = webView else { return }
-
         if sender.state == .ended, sender.velocity(in: webView).x > 150 {
             TelemetryWrapper.recordEvent(
                 category: .action,
@@ -1045,8 +1084,13 @@ extension Tab: TabWebViewDelegate {
     }
 
     func tabWebViewShouldShowAccessoryView(_ tabWebView: TabWebView) -> Bool {
-        // Hide the default WKWebView accessory view panel for PDF documents
-        return mimeType != MIMEType.PDF
+        // Hide the default WKWebView accessory view panel for PDF documents and
+        // there is no accessory view to display (but only for iPad cases)
+        let isPDF = mimeType == MIMEType.PDF
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            return !isPDF && tabWebView.accessoryView.hasAccessoryView
+        }
+        return !isPDF
     }
 }
 
@@ -1149,17 +1193,23 @@ protocol TabWebViewDelegate: AnyObject {
     func tabWebViewShouldShowAccessoryView(_ tabWebView: TabWebView) -> Bool
 }
 
-class TabWebView: WKWebView, MenuHelperWebViewInterface, ThemeApplicable {
-    private struct UX {
-        static let documentLoadingViewAnimationDuration: CGFloat = 0.3
-    }
-
+class TabWebView: WKWebView, MenuHelperWebViewInterface, ThemeApplicable, FeatureFlaggable {
     lazy var accessoryView = AccessoryViewProvider(windowUUID: windowUUID)
     private var logger: Logger = DefaultLogger.shared
     private weak var delegate: TabWebViewDelegate?
     let windowUUID: WindowUUID
     private var pullRefresh: PullRefreshView?
-    private var documentLoadingView: TemporaryDocumentLoadingView?
+    private var isPDFRefactorEnabled: Bool {
+        return featureFlags.isFeatureEnabled(.pdfRefactor, checking: .buildOnly)
+    }
+
+    override var hasOnlySecureContent: Bool {
+        // When PDF refactor enabled we show the online URL for a local PDF so secure content should be true
+        if isPDFRefactorEnabled, let url, url.isFileURL, url.lastPathComponent.hasSuffix(".pdf") {
+            return true
+        }
+        return super.hasOnlySecureContent
+    }
 
     override var inputAccessoryView: UIView? {
         guard delegate?.tabWebViewShouldShowAccessoryView(self) ?? true else { return nil }
@@ -1255,7 +1305,7 @@ class TabWebView: WKWebView, MenuHelperWebViewInterface, ThemeApplicable {
     // MARK: - PullRefresh
 
     func addPullRefresh(onReload: @escaping () -> Void) {
-        guard !scrollView.isZooming else { return }
+        guard !scrollView.isZooming, scrollView.frame != .zero else { return }
         guard pullRefresh == nil else {
             pullRefresh?.startObservingContentScroll()
             return
@@ -1288,38 +1338,11 @@ class TabWebView: WKWebView, MenuHelperWebViewInterface, ThemeApplicable {
     /// Updates the `background-color` of the webview to match
     /// the theme if the webview is showing "about:blank" (nil).
     func applyTheme(theme: Theme) {
+        backgroundColor = theme.colors.layer1
         pullRefresh?.applyTheme(theme: theme)
-        documentLoadingView?.applyTheme(theme: theme)
         if url == nil {
             let backgroundColor = theme.colors.layer1.hexString
             evaluateJavascriptInDefaultContentWorld("document.documentElement.style.backgroundColor = '\(backgroundColor)';")
-        }
-    }
-
-    // MARK: - Document loading handling
-
-    func showDocumentLoadingView() {
-        guard documentLoadingView == nil else { return }
-        let documentLoadingView = TemporaryDocumentLoadingView(frame: bounds)
-        documentLoadingView.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(documentLoadingView)
-        NSLayoutConstraint.activate([
-            documentLoadingView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            documentLoadingView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            documentLoadingView.topAnchor.constraint(equalTo: topAnchor),
-            documentLoadingView.bottomAnchor.constraint(equalTo: bottomAnchor)
-        ])
-        documentLoadingView.animateLoadingAppearanceIfNeeded()
-        self.documentLoadingView = documentLoadingView
-    }
-
-    func removeDocumentLoadingView() {
-        guard let documentLoadingView else { return }
-        UIView.animate(withDuration: UX.documentLoadingViewAnimationDuration) {
-            documentLoadingView.alpha = 0.0
-        } completion: { _ in
-            documentLoadingView.removeFromSuperview()
-            self.documentLoadingView = nil
         }
     }
 }

@@ -6,10 +6,17 @@ import CoreSpotlight
 import Foundation
 import Glean
 import Shared
+import Common
 
 final class RouteBuilder: FeatureFlaggable {
     private var isPrivate = false
     private var prefs: Prefs?
+    private var mainQueue: DispatchQueueInterface
+    var shouldOpenNewTab = true
+
+    init(mainQueue: DispatchQueueInterface = DispatchQueue.main) {
+        self.mainQueue = mainQueue
+    }
 
     func configure(isPrivate: Bool,
                    prefs: Prefs) {
@@ -27,6 +34,7 @@ final class RouteBuilder: FeatureFlaggable {
 
         if let host = parseURLHost(url) {
             let urlQuery = urlScanner.fullURLQueryItem()?.asURL
+            guard host.isValidURL(urlQuery: urlQuery) else { return nil }
             // Unless the `open-url` URL specifies a `private` parameter,
             // use the last browsing mode the user was in.
             let isPrivate = Bool(urlScanner.value(query: "private") ?? "") ?? isPrivate
@@ -62,15 +70,13 @@ final class RouteBuilder: FeatureFlaggable {
                 )
 
             case .openUrl:
-                // If we have a URL query, then make sure to check its a webpage
-                if urlQuery == nil || urlQuery?.isWebPage() ?? false {
-                    return .search(url: urlQuery, isPrivate: isPrivate)
-                } else {
-                    return nil
-                }
+                return .search(url: urlQuery, isPrivate: isPrivate)
 
             case .openText:
-                return .searchQuery(query: urlScanner.value(query: "text") ?? "", isPrivate: isPrivate)
+                let queryValue = urlScanner.value(query: "text") ?? ""
+                let queryURL = URIFixup.getURL(queryValue)
+                let safeQuery = queryURL != nil ? queryValue.replacingOccurrences(of: "://", with: "%3A%2F%2F") : queryValue
+                return .searchQuery(query: safeQuery, isPrivate: isPrivate)
 
             case .glean:
                 return .glean(url: url)
@@ -81,19 +87,19 @@ final class RouteBuilder: FeatureFlaggable {
 
             case .widgetSmallQuickLinkOpenUrl:
                 // Widget Quick links - small - open url private or regular
-                return .search(url: urlQuery, isPrivate: isPrivate, options: [.focusLocationField])
+                return getWidgetRoute(urlQuery: urlQuery, isPrivate: isPrivate)
 
             case .widgetMediumQuickLinkOpenUrl:
                 // Widget Quick Actions - medium - open url private or regular
-                return .search(url: urlQuery, isPrivate: isPrivate, options: [.focusLocationField])
+                return getWidgetRoute(urlQuery: urlQuery, isPrivate: isPrivate)
 
             case .widgetSmallQuickLinkOpenCopied, .widgetMediumQuickLinkOpenCopied:
                 // Widget Quick links - medium - open copied url
-                if !UIPasteboard.general.hasURLs {
-                    let searchText = UIPasteboard.general.string ?? ""
+                if !UIPasteboard.general.hasURLs, let searchText = UIPasteboard.general.string {
                     return .searchQuery(query: searchText, isPrivate: isPrivate)
                 } else {
                     let url = UIPasteboard.general.url
+                    guard host.isValidURL(urlQuery: url) else { return nil }
                     return .search(url: url, isPrivate: isPrivate)
                 }
 
@@ -155,7 +161,12 @@ final class RouteBuilder: FeatureFlaggable {
 
     func makeRoute(userActivity: NSUserActivity) -> Route? {
         // If the user activity is a Siri shortcut to open the app, show a new search tab.
-        if userActivity.activityType == SiriShortcuts.activityType.openURL.rawValue {
+        // By using shouldOpenNewTab we avoid duplicated user activities, from Siri, for new tab.
+        if userActivity.activityType == SiriShortcuts.activityType.openURL.rawValue && shouldOpenNewTab {
+            shouldOpenNewTab = false
+            mainQueue.asyncAfter(deadline: .now() + 1) { [weak self] in
+                self?.shouldOpenNewTab = true
+            }
             return .search(url: nil, isPrivate: false)
         }
 
@@ -170,7 +181,7 @@ final class RouteBuilder: FeatureFlaggable {
         if userActivity.activityType == CSSearchableItemActionType {
             guard let userInfo = userActivity.userInfo,
                   let urlString = userInfo[CSSearchableItemActivityIdentifier] as? String,
-                  let url = URL(string: urlString, invalidCharacters: false)
+                  let url = URL(string: urlString)
             else {
                 return nil
             }
@@ -207,6 +218,11 @@ final class RouteBuilder: FeatureFlaggable {
         case .qrCode:
             return .action(action: .showQRCode)
         }
+    }
+
+    private func getWidgetRoute(urlQuery: URL?, isPrivate: Bool) -> Route? {
+        let isCustomLink = prefs?.stringForKey(NewTabAccessors.NewTabPrefKey) == NewTabPage.homePage.rawValue
+        return .search(url: urlQuery, isPrivate: isPrivate, options: isCustomLink ? [] : [.focusLocationField])
     }
 
     // MARK: - Telemetry

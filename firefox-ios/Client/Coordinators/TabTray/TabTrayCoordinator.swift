@@ -15,20 +15,27 @@ protocol TabTrayNavigationHandler: AnyObject {
 class TabTrayCoordinator: BaseCoordinator,
                           ParentCoordinatorDelegate,
                           TabTrayViewControllerDelegate,
-                          TabTrayNavigationHandler {
-    private var tabTrayViewController: TabTrayViewController?
+                          TabTrayNavigationHandler,
+                          FeatureFlaggable {
+    var tabTrayViewController: TabTrayViewController?
+    weak var parentCoordinator: TabTrayCoordinatorDelegate?
     private let profile: Profile
     private let tabManager: TabManager
-    weak var parentCoordinator: TabTrayCoordinatorDelegate?
+
+    private var isTabTrayUIExperimentsEnabled: Bool {
+        return featureFlags.isFeatureEnabled(.tabTrayUIExperiments, checking: .buildOnly)
+        && UIDevice.current.userInterfaceIdiom != .pad
+    }
 
     init(router: Router,
          tabTraySection: TabTrayPanelType,
          profile: Profile,
-         tabManager: TabManager) {
+         tabManager: TabManager
+    ) {
         self.profile = profile
         self.tabManager = tabManager
         super.init(router: router)
-        initializeTabTrayViewController(selectedTab: tabTraySection)
+        initializeTabTrayViewController(panelType: tabTraySection)
     }
 
     func dismissChildTabTrayPanels() {
@@ -37,14 +44,14 @@ class TabTrayCoordinator: BaseCoordinator,
         childVCs.forEach { ($0 as? TabDisplayPanelViewController)?.removeTabPanel() }
     }
 
-    private func initializeTabTrayViewController(selectedTab: TabTrayPanelType) {
-        let tabTrayViewController = TabTrayViewController(selectedTab: selectedTab, windowUUID: tabManager.windowUUID)
+    private func initializeTabTrayViewController(panelType: TabTrayPanelType) {
+        let tabTrayViewController = TabTrayViewController(panelType: panelType, windowUUID: tabManager.windowUUID)
         router.setRootViewController(tabTrayViewController)
+        self.tabTrayViewController = tabTrayViewController
         tabTrayViewController.childPanelControllers = makeChildPanels()
+        tabTrayViewController.childPanelThemes = makeChildPanelThemes()
         tabTrayViewController.delegate = self
         tabTrayViewController.navigationHandler = self
-
-        self.tabTrayViewController = tabTrayViewController
     }
 
     func start(with tabTraySection: TabTrayPanelType) {
@@ -56,17 +63,29 @@ class TabTrayCoordinator: BaseCoordinator,
         let regularTabsPanel = TabDisplayPanelViewController(isPrivateMode: false, windowUUID: windowUUID)
         let privateTabsPanel = TabDisplayPanelViewController(isPrivateMode: true, windowUUID: windowUUID)
         let syncTabs = RemoteTabsPanel(windowUUID: windowUUID)
-        return [
-            ThemedNavigationController(rootViewController: regularTabsPanel, windowUUID: windowUUID),
-            ThemedNavigationController(rootViewController: privateTabsPanel, windowUUID: windowUUID),
-            ThemedNavigationController(rootViewController: syncTabs, windowUUID: windowUUID)
-        ]
+
+        let panels: [UIViewController]
+        // Panels order is different for the experiment
+        if isTabTrayUIExperimentsEnabled {
+            panels = [privateTabsPanel, regularTabsPanel, syncTabs]
+        } else {
+            panels = [regularTabsPanel, privateTabsPanel, syncTabs]
+        }
+
+        return panels.map {
+            ThemedNavigationController(rootViewController: $0, windowUUID: windowUUID)
+        }
+    }
+
+    private func makeChildPanelThemes() -> [Theme] {
+        guard let panels = tabTrayViewController?.childPanelControllers else { return [] }
+        let themes: [Theme] = panels.compactMap { panel in
+            (panel.topViewController as? TabTrayThemeable)?.retrieveTheme()
+        }
+        return themes
     }
 
     func start(panelType: TabTrayPanelType, navigationController: UINavigationController) {
-        TelemetryWrapper.recordEvent(category: .action,
-                                     method: .open,
-                                     object: .tabTray)
         switch panelType {
         case .tabs:
             makeTabsCoordinator(navigationController: navigationController)
@@ -97,18 +116,12 @@ class TabTrayCoordinator: BaseCoordinator,
 
     // MARK: - ParentCoordinatorDelegate
     func didFinish(from childCoordinator: Coordinator) {
-        TelemetryWrapper.recordEvent(category: .action,
-                                     method: .close,
-                                     object: .tabTray)
         remove(child: childCoordinator)
         parentCoordinator?.didDismissTabTray(from: self)
     }
 
     // MARK: - TabTrayViewControllerDelegate
     func didFinish() {
-        TelemetryWrapper.recordEvent(category: .action,
-                                     method: .close,
-                                     object: .tabTray)
         parentCoordinator?.didDismissTabTray(from: self)
     }
 }

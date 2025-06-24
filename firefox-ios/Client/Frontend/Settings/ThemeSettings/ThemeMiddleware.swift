@@ -44,7 +44,7 @@ class ThemeManagerMiddleware: ThemeManagerProvider {
 
     private func resolveMainMenuAction(action: MainMenuAction) {
         switch action.actionType {
-        case MainMenuDetailsActionType.tapToggleNightMode:
+        case MainMenuDetailsActionType.tapToggleNightMode, MainMenuActionType.tapToggleNightMode:
             updateNightMode()
         default:
             break
@@ -126,7 +126,10 @@ class ThemeManagerMiddleware: ThemeManagerProvider {
 
     func updateNightMode() {
         NightModeHelper.toggle()
-        themeManager.applyThemeUpdatesToWindows()
+        // When the new appearance menu experiment is on, toggling night mode does not update the app theme.
+        if !themeManager.isNewAppearanceMenuOn {
+            themeManager.applyThemeUpdatesToWindows()
+        }
     }
 
     private func dispatchMiddlewareAction(
@@ -139,6 +142,6 @@ class ThemeManagerMiddleware: ThemeManagerProvider {
             windowUUID: oldAction.windowUUID,
             actionType: newActionType)
 
-        store.dispatch(action)
+        store.dispatchLegacy(action)
     }
 }

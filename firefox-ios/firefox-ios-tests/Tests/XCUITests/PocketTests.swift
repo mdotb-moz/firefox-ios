@@ -3,6 +3,7 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/
 
 import XCTest
+import Common
 
 class PocketTests: BaseTestCase {
     enum SwipeDirection {
@@ -49,7 +50,7 @@ class PocketTests: BaseTestCase {
         mozWaitForElementToExist(app.staticTexts[AccessibilityIdentifiers.FirefoxHomepage.SectionTitles.pocket])
         XCTAssertEqual(
             app.staticTexts[AccessibilityIdentifiers.FirefoxHomepage.SectionTitles.pocket].label,
-            "Thought-Provoking Stories"
+            "Stories"
         )
 
         // There should be at least 8 stories on iPhone and 7 on iPad.
@@ -73,17 +74,26 @@ class PocketTests: BaseTestCase {
         // The url textField is not empty
         let url = app.textFields[AccessibilityIdentifiers.Browser.AddressToolbar.searchTextField]
         XCTAssertNotEqual(url.value as? String, "", "The url textField is empty")
-        app.buttons["TabToolbar.backButton"].waitAndTap()
+    }
 
-        scrollToElement(app.buttons[AccessibilityIdentifiers.FirefoxHomepage.Pocket.footerLearnMoreLabel],
-                        direction: SwipeDirection.up,
-                        maxSwipes: MAX_SWIPE)
-        app.swipeUp()
-        scrollToElement(app.cells.staticTexts["Discover more"], direction: .left, maxSwipes: MAX_SWIPE)
-
-        app.cells.staticTexts["Discover more"].waitAndTap()
-        waitUntilPageLoad()
-        mozWaitForElementToExist(url)
-        XCTAssertEqual(url.value as? String, "getpocket.com", "The url textField is empty")
+    // https://mozilla.testrail.io/index.php?/cases/view/2855360
+    func testValidatePocketContextMenu() {
+        navigator.goto(NewTabScreen)
+        mozWaitForElementToExist(app.staticTexts[AccessibilityIdentifiers.FirefoxHomepage.SectionTitles.pocket])
+        // Long tap on one of the stories
+        let pocketCell = AccessibilityIdentifiers.FirefoxHomepage.Pocket.itemCell
+        app.collectionViews.cells.matching(identifier: pocketCell).staticTexts.firstMatch.press(forDuration: 1.5)
+        // Validate Context menu
+        let contextMenuTable = app.tables["Context Menu"]
+        waitForElementsToExist(
+            [
+                contextMenuTable.otherElements.staticTexts.firstMatch,
+                contextMenuTable.otherElements.staticTexts.elementContainingText(".co"),
+                contextMenuTable.cells.buttons[StandardImageIdentifiers.Large.plus],
+                contextMenuTable.cells.buttons[StandardImageIdentifiers.Large.privateMode],
+                contextMenuTable.cells.buttons[StandardImageIdentifiers.Large.bookmark],
+                contextMenuTable.cells.buttons[StandardImageIdentifiers.Large.share]
+            ]
+        )
     }
 }

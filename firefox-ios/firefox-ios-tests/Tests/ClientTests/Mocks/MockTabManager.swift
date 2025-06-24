@@ -11,16 +11,14 @@ import Common
 class MockTabManager: TabManager {
     let windowUUID: WindowUUID
     var isRestoringTabs = false
+    var tabRestoreHasFinished = false
+    var selectedIndex = 0
     var selectedTab: Tab?
     var selectedTabUUID: UUID?
     var backupCloseTab: BackupCloseTab?
     var backupCloseTabs = [Tab]()
 
-    var nextRecentlyAccessedNormalTabs = [Tab]()
-
-    var recentlyAccessedNormalTabs: [Tab] {
-        return nextRecentlyAccessedNormalTabs
-    }
+    var recentlyAccessedNormalTabs: [Tab]
 
     var tabs = [Tab]()
 
@@ -39,21 +37,32 @@ class MockTabManager: TabManager {
 
     var removeTabsByURLCalled = 0
 
-    init(windowUUID: WindowUUID = WindowUUID.XCTestDefaultUUID) {
+    var addTabWasCalled = false
+    var notifyCurrentTabDidFinishLoadingCalled = 0
+    var commitChangesCalled = 0
+
+    init(
+        windowUUID: WindowUUID = WindowUUID.XCTestDefaultUUID,
+        recentlyAccessedNormalTabs: [Tab] = [Tab]()
+    ) {
         self.windowUUID = windowUUID
+        self.recentlyAccessedNormalTabs = recentlyAccessedNormalTabs
     }
 
     subscript(index: Int) -> Tab? {
-        return nil
+        return tabs[index]
     }
 
     subscript(webView: WKWebView) -> Tab? {
-        return nil
+        return tabs.first {
+            $0.webView === webView
+        }
     }
 
     func selectTab(_ tab: Tab?, previous: Tab?) {
         if let tab = tab {
             lastSelectedTabs.append(tab)
+            selectedTab = tab
         }
 
         if let previous = previous {
@@ -61,20 +70,9 @@ class MockTabManager: TabManager {
         }
     }
 
-    func addTab(_ request: URLRequest?, afterTab: Tab?, isPrivate: Bool) -> Tab {
-        let profile = MockProfile()
-        let tab = Tab(profile: profile, isPrivate: isPrivate, windowUUID: windowUUID)
-        tabs.append(tab)
-        return tab
-    }
-
-    func getMostRecentHomepageTab() -> Tab? {
-        return addTab(nil, afterTab: nil, isPrivate: false)
-    }
-
     func addDelegate(_ delegate: TabManagerDelegate) {}
 
-    func addNavigationDelegate(_ delegate: WKNavigationDelegate) {}
+    func setNavigationDelegate(_ delegate: WKNavigationDelegate) {}
 
     func removeDelegate(_ delegate: TabManagerDelegate, completion: (() -> Void)?) {}
 
@@ -85,11 +83,11 @@ class MockTabManager: TabManager {
 
     func reAddTabs(tabsToAdd: [Tab], previousTabUUID: String) {}
 
-    func removeTab(_ tab: Tab, completion: (() -> Void)?) {}
+    func removeTabWithCompletion(_ tabUUID: TabUUID, completion: (() -> Void)?) {}
 
     func removeTabs(_ tabs: [Tab]) {}
 
-    func removeTab(_ tabUUID: String) async {}
+    func removeTab(_ tabUUID: TabUUID) async {}
 
     func removeAllTabs(isPrivateMode: Bool) async {}
 
@@ -97,25 +95,25 @@ class MockTabManager: TabManager {
         removeTabsByURLCalled += 1
     }
 
+    func removeNormalTabsOlderThan(period: TabsDeletionPeriod, currentDate: Date) {}
+
     func undoCloseAllTabs() {}
 
     func undoCloseTab() {}
 
     func clearAllTabsHistory() {}
 
-    func willSwitchTabMode(leavingPBM: Bool) {}
+    func commitChanges() {
+        commitChangesCalled += 1
+    }
 
-    func cleanupClosedTabs(_ closedTabs: [Tab], previous: Tab?, isPrivate: Bool) {}
+    func willSwitchTabMode(leavingPBM: Bool) {}
 
     func reorderTabs(isPrivate privateMode: Bool, fromIndex visibleFromIndex: Int, toIndex visibleToIndex: Int) {}
 
     func preserveTabs() {}
 
     func restoreTabs(_ forced: Bool) {}
-
-    func startAtHomeCheck() -> Bool {
-        false
-    }
 
     func getTabForUUID(uuid: String) -> Tab? {
         return nil
@@ -147,7 +145,8 @@ class MockTabManager: TabManager {
                 zombie: Bool,
                 isPrivate: Bool
     ) -> Tab {
-        return Tab(profile: MockProfile(), windowUUID: windowUUID)
+        addTabWasCalled = true
+        return Tab(profile: MockProfile(), isPrivate: isPrivate, windowUUID: windowUUID)
     }
 
     func backgroundRemoveAllTabs(isPrivate: Bool,
@@ -167,4 +166,10 @@ class MockTabManager: TabManager {
     func removeAllInactiveTabs() async {}
 
     func undoCloseInactiveTabs() async {}
+
+    func notifyCurrentTabDidFinishLoading() {
+        notifyCurrentTabDidFinishLoadingCalled += 1
+    }
+
+    func tabDidSetScreenshot(_ tab: Client.Tab) {}
 }

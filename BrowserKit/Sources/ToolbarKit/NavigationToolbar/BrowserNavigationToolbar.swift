@@ -10,7 +10,7 @@ public protocol BrowserNavigationToolbarDelegate: AnyObject {
 }
 
 /// Navigation toolbar implementation.
-public class BrowserNavigationToolbar: UIView, NavigationToolbar, ThemeApplicable {
+public final class BrowserNavigationToolbar: UIView, NavigationToolbar, ThemeApplicable {
     private enum UX {
         static let horizontalEdgeSpace: CGFloat = 16
         static let buttonSize = CGSize(width: 48, height: 48)
@@ -24,6 +24,13 @@ public class BrowserNavigationToolbar: UIView, NavigationToolbar, ThemeApplicabl
     private lazy var toolbarBorderView: UIView = .build()
     private var toolbarBorderHeightConstraint: NSLayoutConstraint?
     private var theme: Theme?
+    private var isTranslucent = false {
+        didSet {
+            // We need to call applyTheme to ensure the colors are updated in sync whenever the translucency changes.
+            guard let theme, isTranslucent != oldValue else { return }
+            applyTheme(theme: theme)
+        }
+    }
 
     override init(frame: CGRect) {
         super.init(frame: .zero)
@@ -34,9 +41,12 @@ public class BrowserNavigationToolbar: UIView, NavigationToolbar, ThemeApplicabl
         fatalError("init(coder:) has not been implemented")
     }
 
-    public func configure(config: NavigationToolbarConfiguration, toolbarDelegate: BrowserNavigationToolbarDelegate) {
+    public func configure(
+        config: NavigationToolbarConfiguration,
+        toolbarDelegate: BrowserNavigationToolbarDelegate
+    ) {
         self.toolbarDelegate = toolbarDelegate
-
+        self.isTranslucent = config.isTranslucencyEnabled
         updateActionStack(toolbarElements: config.actions)
 
         // Update border
@@ -94,7 +104,7 @@ public class BrowserNavigationToolbar: UIView, NavigationToolbar, ThemeApplicabl
 
     // MARK: - ThemeApplicable
     public func applyTheme(theme: Theme) {
-        backgroundColor = theme.colors.layer1
+        backgroundColor = isTranslucent ? .clear : theme.colors.layerSurfaceLow
         toolbarBorderView.backgroundColor = theme.colors.borderPrimary
 
         actionStack.arrangedSubviews.forEach { element in

@@ -1,4 +1,4 @@
-// swift-tools-version: 5.6
+// swift-tools-version: 5.10
 
 import PackageDescription
 
@@ -41,6 +41,9 @@ let package = Package(
         .library(
             name: "ContentBlockingGenerator",
             targets: ["ContentBlockingGenerator"]),
+        .library(
+            name: "OnboardingKit",
+            targets: ["OnboardingKit"]),
         .executable(
             name: "ExecutableContentBlockingGenerator",
             targets: ["ExecutableContentBlockingGenerator"]),
@@ -51,7 +54,7 @@ let package = Package(
             branch: "master"),
         .package(
             url: "https://github.com/onevcat/Kingfisher.git",
-            exact: "8.1.3"),
+            exact: "8.2.0"),
         .package(
             url: "https://github.com/AliSoftware/Dip.git",
             exact: "7.1.1"),
@@ -66,7 +69,7 @@ let package = Package(
             branch: "master"),
         .package(
             url: "https://github.com/swhitty/SwiftDraw",
-            exact: "0.17.0"),
+            exact: "0.18.3"),
     ],
     targets: [
         .target(name: "Shared",
@@ -91,6 +94,7 @@ let package = Package(
             dependencies: ["SiteImageView", .product(name: "GCDWebServers", package: "GCDWebServer")],
             resources: [
                 .copy("Resources/mozilla.ico"),
+                .copy("Resources/inf-nan.svg"),
                 .copy("Resources/hackernews.svg")
             ]
         ),
@@ -149,6 +153,17 @@ let package = Package(
         .testTarget(
             name: "ContentBlockingGeneratorTests",
             dependencies: ["ContentBlockingGenerator"]),
+        .target(
+            name: "OnboardingKit",
+            dependencies: ["Common", "ComponentLibrary"],
+            resources: [
+                .process("Shaders")
+            ],
+            swiftSettings: [.unsafeFlags(["-enable-testing"])],
+            linkerSettings: [
+                .linkedFramework("Metal"),
+                .linkedFramework("MetalKit")
+            ]),
         .executableTarget(
             name: "ExecutableContentBlockingGenerator",
             dependencies: ["ContentBlockingGenerator"]),

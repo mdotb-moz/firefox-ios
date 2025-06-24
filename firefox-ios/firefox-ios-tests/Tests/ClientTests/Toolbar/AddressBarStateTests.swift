@@ -29,7 +29,8 @@ final class AddressBarStateTests: XCTestCase, StoreTestUtility {
 
         XCTAssertEqual(initialState.windowUUID, windowUUID)
         XCTAssertEqual(initialState.navigationActions, [])
-        XCTAssertEqual(initialState.pageActions, [])
+        XCTAssertEqual(initialState.trailingPageActions, [])
+        XCTAssertEqual(initialState.leadingPageActions, [])
         XCTAssertEqual(initialState.browserActions, [])
         XCTAssertNil(initialState.borderPosition)
         XCTAssertNil(initialState.url)
@@ -42,7 +43,7 @@ final class AddressBarStateTests: XCTestCase, StoreTestUtility {
         XCTAssertFalse(initialState.isLoading)
         XCTAssertNil(initialState.readerModeState)
         XCTAssertFalse(initialState.didStartTyping)
-        XCTAssertTrue(initialState.showQRPageAction)
+        XCTAssertTrue(initialState.isEmptySearch)
     }
 
     func test_didLoadToolbarsAction_returnsExpectedState() {
@@ -62,12 +63,9 @@ final class AddressBarStateTests: XCTestCase, StoreTestUtility {
         XCTAssertEqual(newState.windowUUID, windowUUID)
         XCTAssertEqual(newState.navigationActions, [])
 
-        XCTAssertEqual(newState.pageActions.count, 1)
-        XCTAssertEqual(newState.pageActions[0].actionType, .qrCode)
-
-        XCTAssertEqual(newState.browserActions.count, 2)
-        XCTAssertEqual(newState.browserActions[0].actionType, .tabs)
-        XCTAssertEqual(newState.browserActions[1].actionType, .menu)
+        XCTAssertEqual(newState.leadingPageActions.count, 0)
+        XCTAssertEqual(newState.trailingPageActions.count, 0)
+        XCTAssertEqual(newState.browserActions.count, 0)
 
         XCTAssertEqual(newState.borderPosition, .top)
         XCTAssertNil(newState.url)
@@ -80,11 +78,11 @@ final class AddressBarStateTests: XCTestCase, StoreTestUtility {
         XCTAssertFalse(newState.isLoading)
         XCTAssertNil(newState.readerModeState)
         XCTAssertFalse(newState.didStartTyping)
-        XCTAssertTrue(newState.showQRPageAction)
+        XCTAssertTrue(newState.isEmptySearch)
     }
 
-    func test_numberOfTabsChangedAction_returnsExpectedState() {
-        setupStore()
+    func test_numberOfTabsChangedAction_withoutNavToolbar_returnsExpectedState() {
+        setupStore(with: initialToolbarState(isShowingNavigationToolbar: false))
         let initialState = createSubject()
         let reducer = addressBarReducer()
 
@@ -100,9 +98,9 @@ final class AddressBarStateTests: XCTestCase, StoreTestUtility {
 
         XCTAssertEqual(newState.windowUUID, windowUUID)
         XCTAssertEqual(newState.browserActions.count, 2)
-        XCTAssertEqual(newState.browserActions[0].actionType, .tabs)
-        XCTAssertEqual(newState.browserActions[0].numberOfTabs, 2)
-        XCTAssertEqual(newState.browserActions[1].actionType, .menu)
+        XCTAssertEqual(newState.browserActions[0].actionType, .menu)
+        XCTAssertEqual(newState.browserActions[1].actionType, .tabs)
+        XCTAssertEqual(newState.browserActions[1].numberOfTabs, 2)
     }
 
     func test_readerModeStateChangedAction_onHomepage_returnsExpectedState() {
@@ -120,8 +118,8 @@ final class AddressBarStateTests: XCTestCase, StoreTestUtility {
         )
 
         XCTAssertEqual(newState.windowUUID, windowUUID)
-        XCTAssertEqual(newState.pageActions.count, 1)
-        XCTAssertEqual(newState.pageActions[0].actionType, .qrCode)
+        XCTAssertEqual(newState.leadingPageActions.count, 0)
+        XCTAssertEqual(newState.trailingPageActions.count, 0)
     }
 
     func test_readerModeStateChangedAction_onWebsite_returnsExpectedState() {
@@ -140,14 +138,14 @@ final class AddressBarStateTests: XCTestCase, StoreTestUtility {
         )
 
         XCTAssertEqual(newState.windowUUID, windowUUID)
-        XCTAssertEqual(newState.pageActions.count, 3)
-        XCTAssertEqual(newState.pageActions[0].actionType, .readerMode)
-        XCTAssertEqual(newState.pageActions[0].iconName, StandardImageIdentifiers.Large.readerView)
-        XCTAssertEqual(newState.pageActions[1].actionType, .share)
-        XCTAssertEqual(newState.pageActions[2].actionType, .reload)
+        XCTAssertEqual(newState.trailingPageActions.count, 2)
+        XCTAssertEqual(newState.trailingPageActions[0].actionType, .readerMode)
+        XCTAssertEqual(newState.trailingPageActions[0].iconName, StandardImageIdentifiers.Medium.readerView)
+        XCTAssertEqual(newState.trailingPageActions[1].actionType, .reload)
+        XCTAssertEqual(newState.leadingPageActions[0].actionType, .share)
     }
 
-    func test_websiteLoadingStateDidChangeAction_returnsExpectedState() {
+    func test_websiteLoadingStateDidChangeAction_withLoadingTrue_returnsExpectedState() {
         setupStore()
         let initialState = createSubject()
         let reducer = addressBarReducer()
@@ -163,12 +161,63 @@ final class AddressBarStateTests: XCTestCase, StoreTestUtility {
         )
 
         XCTAssertEqual(newState.windowUUID, windowUUID)
-        XCTAssertEqual(newState.pageActions.count, 2)
-        XCTAssertEqual(newState.pageActions[0].actionType, .share)
-        XCTAssertEqual(newState.pageActions[1].actionType, .stopLoading)
+        XCTAssertEqual(newState.trailingPageActions.count, 1)
+        XCTAssertEqual(newState.trailingPageActions[0].actionType, .stopLoading)
+        XCTAssertEqual(newState.navigationActions.count, 0)
+        XCTAssertEqual(newState.leadingPageActions.count, 0)
     }
 
-    func test_urlDidChangeAction_returnsExpectedState() {
+    func test_websiteLoadingStateDidChangeAction_withLoadingFalse_returnsExpectedState() {
+        setupStore()
+        let initialState = createSubject()
+        let reducer = addressBarReducer()
+
+        let urlDidChangeState = loadWebsiteAction(state: initialState, reducer: reducer)
+        let newState = reducer(
+            urlDidChangeState,
+            ToolbarAction(
+                isLoading: false,
+                windowUUID: windowUUID,
+                actionType: ToolbarActionType.websiteLoadingStateDidChange
+            )
+        )
+
+        XCTAssertEqual(newState.windowUUID, windowUUID)
+        XCTAssertEqual(newState.trailingPageActions.count, 1)
+        XCTAssertEqual(newState.trailingPageActions[0].actionType, .reload)
+        XCTAssertEqual(newState.navigationActions.count, 0)
+        XCTAssertEqual(newState.leadingPageActions.count, 0)
+    }
+
+    func test_websiteLoadingStateDidChangeAction_withouthNavigationToolbar_returnsExcpectedState() {
+        setupStore()
+
+        let initialState = createSubject()
+        let reducer = addressBarReducer()
+
+        let urlDidChangeState = loadWebsiteAction(state: initialState,
+                                                  reducer: reducer)
+        let newState = reducer(
+            urlDidChangeState,
+            ToolbarAction(
+                isShowingNavigationToolbar: false,
+                isLoading: true,
+                windowUUID: windowUUID,
+                actionType: ToolbarActionType.websiteLoadingStateDidChange
+            )
+        )
+
+        XCTAssertEqual(newState.windowUUID, windowUUID)
+        XCTAssertEqual(newState.trailingPageActions.count, 1)
+        XCTAssertEqual(newState.trailingPageActions[0].actionType, .stopLoading)
+        XCTAssertEqual(newState.leadingPageActions.count, 0)
+
+        XCTAssertEqual(newState.navigationActions.count, 2)
+        XCTAssertEqual(newState.navigationActions[0].actionType, .back)
+        XCTAssertEqual(newState.navigationActions[1].actionType, .forward)
+    }
+
+    func test_urlDidChangeAction_withNavigationToolbar_returnsExpectedState() {
         setupStore()
         let initialState = createSubject()
         let reducer = addressBarReducer()
@@ -177,14 +226,30 @@ final class AddressBarStateTests: XCTestCase, StoreTestUtility {
 
         XCTAssertEqual(newState.windowUUID, windowUUID)
 
-        XCTAssertEqual(newState.pageActions.count, 2)
-        XCTAssertEqual(newState.pageActions[0].actionType, .share)
-        XCTAssertEqual(newState.pageActions[1].actionType, .reload)
+        XCTAssertEqual(newState.trailingPageActions.count, 1)
+        XCTAssertEqual(newState.trailingPageActions[0].actionType, .reload)
+        XCTAssertEqual(newState.leadingPageActions[0].actionType, .share)
+
+        XCTAssertEqual(newState.browserActions.count, 0)
+    }
+
+    func test_urlDidChangeAction_withoutNavigationToolbar_returnsExpectedState() {
+        setupStore(with: initialToolbarState(isShowingNavigationToolbar: false))
+        let initialState = createSubject()
+        let reducer = addressBarReducer()
+
+        let newState = loadWebsiteAction(state: initialState, isShowingNavigationToolbar: false, reducer: reducer)
+
+        XCTAssertEqual(newState.windowUUID, windowUUID)
+
+        XCTAssertEqual(newState.trailingPageActions.count, 1)
+        XCTAssertEqual(newState.trailingPageActions[0].actionType, .reload)
+        XCTAssertEqual(newState.leadingPageActions[0].actionType, .share)
 
         XCTAssertEqual(newState.browserActions.count, 3)
         XCTAssertEqual(newState.browserActions[0].actionType, .newTab)
-        XCTAssertEqual(newState.browserActions[1].actionType, .tabs)
-        XCTAssertEqual(newState.browserActions[2].actionType, .menu)
+        XCTAssertEqual(newState.browserActions[1].actionType, .menu)
+        XCTAssertEqual(newState.browserActions[2].actionType, .tabs)
     }
 
     func test_backForwardButtonStateChangedAction_withNavigationToolbar_returnsExpectedState() {
@@ -252,18 +317,18 @@ final class AddressBarStateTests: XCTestCase, StoreTestUtility {
         XCTAssertEqual(newState.navigationActions[0].actionType, .back)
         XCTAssertEqual(newState.navigationActions[1].actionType, .forward)
 
-        XCTAssertEqual(newState.pageActions.count, 1)
-        XCTAssertEqual(newState.pageActions[0].actionType, .qrCode)
+        XCTAssertEqual(newState.trailingPageActions.count, 0)
+        XCTAssertEqual(newState.leadingPageActions.count, 0)
 
         XCTAssertEqual(newState.browserActions.count, 2)
-        XCTAssertEqual(newState.browserActions[0].actionType, .tabs)
-        XCTAssertEqual(newState.browserActions[1].actionType, .menu)
+        XCTAssertEqual(newState.browserActions[0].actionType, .menu)
+        XCTAssertEqual(newState.browserActions[1].actionType, .tabs)
 
         XCTAssertEqual(newState.searchTerm, nil)
     }
 
-    func test_showMenuWarningBadgeAction_returnsExpectedState() {
-        setupStore()
+    func test_showMenuWarningBadgeAction_withoutNavToolbar_returnsExpectedState() {
+        setupStore(with: initialToolbarState(isShowingNavigationToolbar: false))
         let initialState = createSubject()
         let reducer = addressBarReducer()
 
@@ -277,16 +342,17 @@ final class AddressBarStateTests: XCTestCase, StoreTestUtility {
         )
 
         XCTAssertEqual(newState.windowUUID, windowUUID)
-        XCTAssertEqual(newState.navigationActions.count, 0)
+        XCTAssertEqual(newState.navigationActions.count, 2)
+        XCTAssertEqual(newState.navigationActions[0].actionType, .back)
+        XCTAssertEqual(newState.navigationActions[1].actionType, .forward)
 
-        XCTAssertEqual(newState.pageActions.count, 1)
-        XCTAssertEqual(newState.pageActions[0].actionType, .qrCode)
+        XCTAssertEqual(newState.trailingPageActions.count, 0)
 
         XCTAssertEqual(newState.browserActions.count, 2)
-        XCTAssertEqual(newState.browserActions[0].actionType, .tabs)
-        XCTAssertEqual(newState.browserActions[1].actionType, .menu)
-        XCTAssertNotNil(newState.browserActions[1].badgeImageName)
-        XCTAssertNotNil(newState.browserActions[1].maskImageName)
+        XCTAssertEqual(newState.browserActions[0].actionType, .menu)
+        XCTAssertNotNil(newState.browserActions[0].badgeImageName)
+        XCTAssertNotNil(newState.browserActions[0].maskImageName)
+        XCTAssertEqual(newState.browserActions[1].actionType, .tabs)
 
         XCTAssertEqual(newState.searchTerm, nil)
     }
@@ -345,21 +411,19 @@ final class AddressBarStateTests: XCTestCase, StoreTestUtility {
         )
 
         XCTAssertEqual(newState.windowUUID, windowUUID)
-        XCTAssertEqual(newState.navigationActions.count, 1)
-        XCTAssertEqual(newState.navigationActions[0].actionType, .cancelEdit)
+        XCTAssertEqual(newState.navigationActions.count, 0)
 
-        XCTAssertEqual(newState.pageActions.count, 0)
-
-        XCTAssertEqual(newState.browserActions.count, 2)
-        XCTAssertEqual(newState.browserActions[0].actionType, .tabs)
-        XCTAssertEqual(newState.browserActions[1].actionType, .menu)
+        XCTAssertEqual(newState.leadingPageActions.count, 0)
+        XCTAssertEqual(newState.trailingPageActions.count, 0)
+        XCTAssertEqual(newState.browserActions.count, 1)
+        XCTAssertEqual(newState.browserActions[0].actionType, .cancelEdit)
 
         XCTAssertEqual(newState.searchTerm, searchTerm)
         XCTAssertTrue(newState.isEditing)
         XCTAssertTrue(newState.shouldShowKeyboard)
         XCTAssertFalse(newState.shouldSelectSearchTerm)
         XCTAssertFalse(newState.didStartTyping)
-        XCTAssertFalse(newState.showQRPageAction)
+        XCTAssertFalse(newState.isEmptySearch)
     }
 
     func test_didStartEditingUrlAction_onHomepage_returnsExpectedState() {
@@ -377,22 +441,19 @@ final class AddressBarStateTests: XCTestCase, StoreTestUtility {
         )
 
         XCTAssertEqual(newState.windowUUID, windowUUID)
-        XCTAssertEqual(newState.navigationActions.count, 1)
-        XCTAssertEqual(newState.navigationActions[0].actionType, .cancelEdit)
+        XCTAssertEqual(newState.navigationActions.count, 0)
 
-        XCTAssertEqual(newState.pageActions.count, 1)
-        XCTAssertEqual(newState.pageActions[0].actionType, .qrCode)
-
-        XCTAssertEqual(newState.browserActions.count, 2)
-        XCTAssertEqual(newState.browserActions[0].actionType, .tabs)
-        XCTAssertEqual(newState.browserActions[1].actionType, .menu)
+        XCTAssertEqual(newState.leadingPageActions.count, 0)
+        XCTAssertEqual(newState.trailingPageActions.count, 0)
+        XCTAssertEqual(newState.browserActions.count, 1)
+        XCTAssertEqual(newState.browserActions[0].actionType, .cancelEdit)
 
         XCTAssertEqual(newState.searchTerm, nil)
         XCTAssertTrue(newState.isEditing)
         XCTAssertTrue(newState.shouldShowKeyboard)
         XCTAssertTrue(newState.shouldSelectSearchTerm)
         XCTAssertFalse(newState.didStartTyping)
-        XCTAssertTrue(newState.showQRPageAction)
+        XCTAssertTrue(newState.isEmptySearch)
     }
 
     func test_didStartEditingUrlAction_withWebsite_returnsExpectedState() {
@@ -411,21 +472,19 @@ final class AddressBarStateTests: XCTestCase, StoreTestUtility {
         )
 
         XCTAssertEqual(newState.windowUUID, windowUUID)
-        XCTAssertEqual(newState.navigationActions.count, 1)
-        XCTAssertEqual(newState.navigationActions[0].actionType, .cancelEdit)
+        XCTAssertEqual(newState.navigationActions.count, 0)
 
-        XCTAssertEqual(newState.pageActions.count, 0)
-
-        XCTAssertEqual(newState.browserActions.count, 2)
-        XCTAssertEqual(newState.browserActions[0].actionType, .tabs)
-        XCTAssertEqual(newState.browserActions[1].actionType, .menu)
+        XCTAssertEqual(newState.leadingPageActions.count, 0)
+        XCTAssertEqual(newState.trailingPageActions.count, 0)
+        XCTAssertEqual(newState.browserActions.count, 1)
+        XCTAssertEqual(newState.browserActions[0].actionType, .cancelEdit)
 
         XCTAssertEqual(newState.searchTerm, nil)
         XCTAssertTrue(newState.isEditing)
         XCTAssertTrue(newState.shouldShowKeyboard)
         XCTAssertTrue(newState.shouldSelectSearchTerm)
         XCTAssertFalse(newState.didStartTyping)
-        XCTAssertFalse(newState.showQRPageAction)
+        XCTAssertFalse(newState.isEmptySearch)
     }
 
     func test_cancelEditOnHomepageAction_withURL_returnsExpectedState() {
@@ -488,20 +547,18 @@ final class AddressBarStateTests: XCTestCase, StoreTestUtility {
         XCTAssertEqual(newState.windowUUID, windowUUID)
         XCTAssertEqual(newState.navigationActions.count, 0)
 
-        XCTAssertEqual(newState.pageActions.count, 2)
-        XCTAssertEqual(newState.pageActions[0].actionType, .share)
-        XCTAssertEqual(newState.pageActions[1].actionType, .reload)
+        XCTAssertEqual(newState.trailingPageActions.count, 1)
+        XCTAssertEqual(newState.trailingPageActions[0].actionType, .reload)
 
-        XCTAssertEqual(newState.browserActions.count, 2)
-        XCTAssertEqual(newState.browserActions[0].actionType, .tabs)
-        XCTAssertEqual(newState.browserActions[1].actionType, .menu)
+        XCTAssertEqual(newState.leadingPageActions.count, 0)
+        XCTAssertEqual(newState.browserActions.count, 0)
 
         XCTAssertEqual(newState.searchTerm, nil)
         XCTAssertFalse(newState.isEditing)
         XCTAssertTrue(newState.shouldShowKeyboard)
         XCTAssertFalse(newState.shouldSelectSearchTerm)
         XCTAssertFalse(newState.didStartTyping)
-        XCTAssertFalse(newState.showQRPageAction)
+        XCTAssertFalse(newState.isEmptySearch)
     }
 
     func test_didSetTextInLocationViewAction_returnsExpectedState() {
@@ -520,21 +577,18 @@ final class AddressBarStateTests: XCTestCase, StoreTestUtility {
         )
 
         XCTAssertEqual(newState.windowUUID, windowUUID)
-        XCTAssertEqual(newState.navigationActions.count, 1)
-        XCTAssertEqual(newState.navigationActions[0].actionType, .cancelEdit)
-
-        XCTAssertEqual(newState.pageActions.count, 0)
-
-        XCTAssertEqual(newState.browserActions.count, 2)
-        XCTAssertEqual(newState.browserActions[0].actionType, .tabs)
-        XCTAssertEqual(newState.browserActions[1].actionType, .menu)
+        XCTAssertEqual(newState.navigationActions.count, 0)
+        XCTAssertEqual(newState.leadingPageActions.count, 0)
+        XCTAssertEqual(newState.trailingPageActions.count, 0)
+        XCTAssertEqual(newState.browserActions.count, 1)
+        XCTAssertEqual(newState.browserActions[0].actionType, .cancelEdit)
 
         XCTAssertEqual(newState.searchTerm, searchTerm)
         XCTAssertTrue(newState.isEditing)
         XCTAssertFalse(newState.shouldShowKeyboard)
         XCTAssertFalse(newState.shouldSelectSearchTerm)
         XCTAssertFalse(newState.didStartTyping)
-        XCTAssertFalse(newState.showQRPageAction)
+        XCTAssertFalse(newState.isEmptySearch)
 }
 
     func test_hideKeyboardAction_returnsExpectedState() {
@@ -570,11 +624,10 @@ final class AddressBarStateTests: XCTestCase, StoreTestUtility {
 
         XCTAssertEqual(newState.windowUUID, windowUUID)
 
-        XCTAssertEqual(newState.pageActions.count, 1)
-        XCTAssertEqual(newState.pageActions[0].actionType, .qrCode)
+        XCTAssertEqual(newState.trailingPageActions.count, 0)
 
         XCTAssertTrue(newState.isEditing)
-        XCTAssertTrue(newState.showQRPageAction)
+        XCTAssertTrue(newState.isEmptySearch)
     }
 
     func test_didDeleteSearchTermAction_returnsExpectedState() {
@@ -591,12 +644,11 @@ final class AddressBarStateTests: XCTestCase, StoreTestUtility {
 
         XCTAssertEqual(newState.windowUUID, windowUUID)
 
-        XCTAssertEqual(newState.pageActions.count, 1)
-        XCTAssertEqual(newState.pageActions[0].actionType, .qrCode)
+        XCTAssertEqual(newState.trailingPageActions.count, 0)
 
         XCTAssertTrue(newState.isEditing)
         XCTAssertTrue(newState.didStartTyping)
-        XCTAssertTrue(newState.showQRPageAction)
+        XCTAssertTrue(newState.isEmptySearch)
         XCTAssertFalse(newState.shouldSelectSearchTerm)
     }
 
@@ -613,10 +665,10 @@ final class AddressBarStateTests: XCTestCase, StoreTestUtility {
         )
 
         XCTAssertEqual(newState.windowUUID, windowUUID)
-        XCTAssertEqual(newState.pageActions.count, 0)
+        XCTAssertEqual(newState.trailingPageActions.count, 0)
         XCTAssertTrue(newState.isEditing)
         XCTAssertTrue(newState.didStartTyping)
-        XCTAssertFalse(newState.showQRPageAction)
+        XCTAssertFalse(newState.isEmptySearch)
         XCTAssertFalse(newState.shouldSelectSearchTerm)
     }
 
@@ -665,13 +717,16 @@ final class AddressBarStateTests: XCTestCase, StoreTestUtility {
         return AddressBarState.reducer
     }
 
-    private func loadWebsiteAction(state: AddressBarState, reducer: Reducer<AddressBarState>) -> AddressBarState {
+    private func loadWebsiteAction(state: AddressBarState,
+                                   isShowingNavigationToolbar: Bool = true,
+                                   reducer: Reducer<AddressBarState>
+    ) -> AddressBarState {
         return reducer(
             state,
             ToolbarAction(
-                url: URL(string: "http://mozilla.com", invalidCharacters: false),
+                url: URL(string: "http://mozilla.com"),
                 isPrivate: false,
-                isShowingNavigationToolbar: true,
+                isShowingNavigationToolbar: isShowingNavigationToolbar,
                 canGoBack: true,
                 canGoForward: false,
                 lockIconImageName: StandardImageIdentifiers.Large.lockFill,
@@ -710,6 +765,7 @@ final class AddressBarStateTests: XCTestCase, StoreTestUtility {
         return ToolbarState(
             windowUUID: windowUUID,
             toolbarPosition: toolbarState.toolbarPosition,
+            toolbarLayout: toolbarState.toolbarLayout,
             isPrivateMode: toolbarState.isPrivateMode,
             addressToolbar: toolbarState.addressToolbar,
             navigationToolbar: toolbarState.navigationToolbar,
@@ -722,7 +778,8 @@ final class AddressBarStateTests: XCTestCase, StoreTestUtility {
             isNewTabFeatureEnabled: toolbarState.isNewTabFeatureEnabled,
             canShowDataClearanceAction: toolbarState.canShowDataClearanceAction,
             canShowNavigationHint: toolbarState.canShowNavigationHint,
-            shouldAnimate: toolbarState.shouldAnimate)
+            shouldAnimate: toolbarState.shouldAnimate,
+            isTranslucent: toolbarState.isTranslucent)
     }
 
     // MARK: StoreTestUtility

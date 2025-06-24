@@ -4,7 +4,6 @@
 
 import Common
 import Foundation
-import Shared
 
 struct SimpleToast: ThemeApplicable {
     struct UX {
@@ -23,13 +22,16 @@ struct SimpleToast: ThemeApplicable {
         label.font = FXFontStyles.Regular.subheadline.scaledFont()
         label.numberOfLines = 0
         label.backgroundColor = .clear
+        label.adjustsFontSizeToFitWidth = true
+        label.setContentHuggingPriority(.required, for: .vertical)
+        label.setContentCompressionResistancePriority(.required, for: .vertical)
     }
 
     private let heightConstraint: NSLayoutConstraint
 
     init() {
         heightConstraint = containerView.heightAnchor
-            .constraint(equalToConstant: Toast.UX.toastHeightWithShadow)
+            .constraint(greaterThanOrEqualToConstant: Toast.UX.toastHeightWithShadow)
     }
 
     func showAlertWithText(_ text: String,
@@ -43,11 +45,11 @@ struct SimpleToast: ThemeApplicable {
 
         NSLayoutConstraint.activate([
             heightConstraint,
-            containerView.leadingAnchor.constraint(equalTo: bottomContainer.leadingAnchor,
+            containerView.leadingAnchor.constraint(equalTo: bottomContainer.safeAreaLayoutGuide.leadingAnchor,
                                                    constant: Toast.UX.toastSidePadding),
-            containerView.trailingAnchor.constraint(equalTo: bottomContainer.trailingAnchor,
+            containerView.trailingAnchor.constraint(equalTo: bottomContainer.safeAreaLayoutGuide.trailingAnchor,
                                                     constant: -Toast.UX.toastSidePadding),
-            containerView.bottomAnchor.constraint(equalTo: bottomContainer.bottomAnchor,
+            containerView.bottomAnchor.constraint(equalTo: bottomContainer.safeAreaLayoutGuide.bottomAnchor,
                                                   constant: bottomConstraintPadding),
 
             shadowView.topAnchor.constraint(equalTo: containerView.topAnchor,
@@ -58,7 +60,7 @@ struct SimpleToast: ThemeApplicable {
                                                  constant: -Toast.UX.shadowVerticalSpacing),
             shadowView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor,
                                                constant: -Toast.UX.shadowHorizontalSpacing / 2),
-            shadowView.heightAnchor.constraint(equalToConstant: Toast.UX.toastHeightWithoutShadow),
+            shadowView.heightAnchor.constraint(greaterThanOrEqualToConstant: Toast.UX.toastHeightWithoutShadow),
 
             toastLabel.topAnchor.constraint(equalTo: shadowView.topAnchor),
             toastLabel.leadingAnchor.constraint(equalTo: shadowView.leadingAnchor,
@@ -71,7 +73,16 @@ struct SimpleToast: ThemeApplicable {
         animate(containerView)
 
         if UIAccessibility.isVoiceOverRunning {
-            UIAccessibility.post(notification: .announcement, argument: text)
+            let announcementString = NSMutableAttributedString(string: text)
+
+            // FXIOS-10766/10767 Prevents toast messages from being interrupted
+            if #available(iOS 17, *) {
+                let fullRange = NSRange(location: 0, length: announcementString.length)
+                announcementString.addAttribute(NSAttributedString.Key.accessibilitySpeechAnnouncementPriority,
+                                                value: UIAccessibilityPriority.high.rawValue,
+                                                range: fullRange)
+            }
+            UIAccessibility.post(notification: .announcement, argument: announcementString)
         }
     }
 

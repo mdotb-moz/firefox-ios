@@ -10,6 +10,7 @@ import XCTest
 class TelemetryContextualIdentifierTests: XCTestCase {
     override func setUp() {
         super.setUp()
+        DependencyHelperMock().bootstrapDependencies()
         clearTest()
     }
 
@@ -34,6 +35,11 @@ class TelemetryContextualIdentifierTests: XCTestCase {
         let contextId = TelemetryContextualIdentifier.contextId
         TelemetryContextualIdentifier.setupContextId()
         XCTAssertEqual(contextId, TelemetryContextualIdentifier.contextId)
+    }
+
+    func testContextId_noGleanMetricsSetsContextId() {
+        TelemetryContextualIdentifier.setupContextId(isGleanMetricsAllowed: false)
+        XCTAssertNotNil(TelemetryContextualIdentifier.contextId)
     }
 
     func testTelemetryWrapper_setsContextId() {

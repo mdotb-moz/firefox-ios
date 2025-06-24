@@ -57,11 +57,13 @@ enum GeneralBrowserActionType: ActionType {
     case reloadWebsiteNoCache
     case showShare
     case showReaderMode
+    case startAtHome
     case addNewTab
     case showNewTabLongPressActions
     case addToReadingListLongPressAction
     case clearData
     case showPasswordGenerator
+    case didSelectedTabChangeToHomepage
 }
 
 class GeneralBrowserMiddlewareAction: Action {

@@ -10,22 +10,33 @@ public enum ToolbarButtonGesture {
     case longPress
 }
 
-class ToolbarButton: UIButton, ThemeApplicable {
+class ToolbarButton: UIButton, ThemeApplicable, UIGestureRecognizerDelegate {
     private struct UX {
         static let verticalInset: CGFloat = 10
         static let horizontalInset: CGFloat = 10
+        static let horizontalTextInset: CGFloat = 5
         static let badgeIconSize = CGSize(width: 20, height: 20)
+        static let defaultMinimumPressDuration: TimeInterval = 0.5
+        static let minimumPressDurationWithLargeContentViewer: TimeInterval = 1.5
     }
 
     private var foregroundColorNormal: UIColor = .clear
     private var foregroundColorHighlighted: UIColor = .clear
     private var foregroundColorDisabled: UIColor = .clear
+    private var foregroundTitleColorNormal: UIColor = .clear
+    private var foregroundTitleColorHighlighted: UIColor = .clear
     private var backgroundColorNormal: UIColor = .clear
 
     private var badgeImageView: UIImageView?
     private var maskImageView: UIImageView?
 
+    private var longPressRecognizer: UILongPressGestureRecognizer?
     private var onLongPress: ((UIButton) -> Void)?
+    private var notificationCenter: NotificationProtocol?
+    private var largeContentViewerInteraction: UILargeContentViewerInteraction?
+
+    private var isTextButton = false
+    private var hasCustomColor = false
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -35,17 +46,23 @@ class ToolbarButton: UIButton, ThemeApplicable {
                                                                leading: UX.horizontalInset,
                                                                bottom: UX.verticalInset,
                                                                trailing: UX.horizontalInset)
+        titleLabel?.adjustsFontForContentSizeCategory = true
     }
 
-    open func configure(element: ToolbarElement) {
+    open func configure(
+        element: ToolbarElement,
+        notificationCenter: NotificationProtocol = NotificationCenter.default) {
         guard var config = configuration else { return }
-        removeAllGestureRecognizers()
-        configureLongPressGestureRecognizerIfNeeded(for: element)
+        removeLongPressGestureRecognizer()
+        configureLongPressGestureRecognizerIfNeeded(for: element, notificationCenter: notificationCenter)
         configureCustomA11yActionIfNeeded(for: element)
         isSelected = element.isSelected
+        isTextButton = element.title != nil
+        hasCustomColor = element.hasCustomColor
+        self.notificationCenter = notificationCenter
 
         let image = imageConfiguredForRTL(for: element)
-        let action = UIAction(title: element.a11yLabel,
+        let action = UIAction(title: element.title ?? element.a11yLabel,
                               image: image,
                               handler: { [weak self] _ in
             guard let self else { return }
@@ -54,11 +71,26 @@ class ToolbarButton: UIButton, ThemeApplicable {
         })
 
         config.image = image
+        config.title = element.title
+        config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
+            var outgoing = incoming
+            outgoing.font = FXFontStyles.Regular.callout.scaledFont()
+            return outgoing
+        }
+
+        if config.title != nil {
+            config.contentInsets = NSDirectionalEdgeInsets(top: UX.verticalInset,
+                                                           leading: UX.horizontalTextInset,
+                                                           bottom: UX.verticalInset,
+                                                           trailing: UX.horizontalTextInset)
+        }
+
         isEnabled = element.isEnabled
         isAccessibilityElement = true
         accessibilityIdentifier = element.a11yId
         accessibilityLabel = element.a11yLabel
         accessibilityHint = element.a11yHint
+
         // Remove all existing actions for .touchUpInside before adding the new one
         // This ensures that we do not accumulate multiple actions for the same event,
         // which can cause the action to be called multiple times when the button is tapped.
@@ -91,18 +123,24 @@ class ToolbarButton: UIButton, ThemeApplicable {
         fatalError("init(coder:) has not been implemented")
     }
 
+    deinit {
+        notificationCenter?.removeObserver(self)
+    }
+
     override public func updateConfiguration() {
         guard var updatedConfiguration = configuration else { return }
 
         switch state {
         case .highlighted:
-            updatedConfiguration.baseForegroundColor = foregroundColorHighlighted
+            updatedConfiguration.baseForegroundColor = isTextButton ?
+                                                        foregroundTitleColorHighlighted :
+                                                        foregroundColorHighlighted
         case .disabled:
             updatedConfiguration.baseForegroundColor = foregroundColorDisabled
         default:
-            updatedConfiguration.baseForegroundColor = isSelected ?
-                                                       foregroundColorHighlighted :
-                                                       foregroundColorNormal
+            let iconButtonColor = isSelected ? foregroundColorHighlighted : foregroundColorNormal
+            let textButtonColor = isSelected ? foregroundTitleColorHighlighted : foregroundTitleColorNormal
+            updatedConfiguration.baseForegroundColor = isTextButton ? textButtonColor : iconButtonColor
         }
 
         updatedConfiguration.background.backgroundColor = backgroundColorNormal
@@ -137,14 +175,29 @@ class ToolbarButton: UIButton, ThemeApplicable {
         ])
     }
 
-    private func configureLongPressGestureRecognizerIfNeeded(for element: ToolbarElement) {
+    private func configureLongPressGestureRecognizerIfNeeded(for element: ToolbarElement,
+                                                             notificationCenter: NotificationProtocol) {
         guard element.onLongPress != nil else { return }
         onLongPress = element.onLongPress
         let longPressRecognizer = UILongPressGestureRecognizer(
             target: self,
             action: #selector(handleLongPress)
         )
+        longPressRecognizer.delegate = self
         addGestureRecognizer(longPressRecognizer)
+        self.longPressRecognizer = longPressRecognizer
+        setMinimumPressDuration()
+
+        let largeContentViewerInteraction = UILargeContentViewerInteraction()
+        self.largeContentViewerInteraction = largeContentViewerInteraction
+        addInteraction(largeContentViewerInteraction)
+
+        notificationCenter.addObserver(
+            self,
+            selector: #selector(largeContentViewerInteractionDidChange),
+            name: UILargeContentViewerInteraction.enabledStatusDidChangeNotification,
+            object: nil
+        )
     }
 
     private func configureCustomA11yActionIfNeeded(for element: ToolbarElement) {
@@ -158,15 +211,29 @@ class ToolbarButton: UIButton, ThemeApplicable {
     }
 
     private func imageConfiguredForRTL(for element: ToolbarElement) -> UIImage? {
-        let image = UIImage(named: element.iconName)?.withRenderingMode(.alwaysTemplate)
+        guard let iconName = element.iconName else { return nil }
+        let image = UIImage(named: iconName)?.withRenderingMode(.alwaysTemplate)
         return element.isFlippedForRTL ? image?.imageFlippedForRightToLeftLayoutDirection() : image
     }
 
-    private func removeAllGestureRecognizers() {
-        guard let gestureRecognizers else { return }
-            for recognizer in gestureRecognizers {
-                removeGestureRecognizer(recognizer)
-            }
+    private func removeLongPressGestureRecognizer() {
+        guard let recognizer = longPressRecognizer, let interaction = largeContentViewerInteraction else { return }
+        removeGestureRecognizer(recognizer)
+        longPressRecognizer = nil
+
+        removeInteraction(interaction)
+        largeContentViewerInteraction = nil
+    }
+
+    private func setMinimumPressDuration() {
+        // The default long press duration is 0.5. Here we extend it if
+        // UILargeContentViewInteraction is enabled to allow the large content
+        // viewer time to display the content
+        var minimumPressDuration: TimeInterval = UX.defaultMinimumPressDuration
+        if UILargeContentViewerInteraction.isEnabled {
+            minimumPressDuration = UX.minimumPressDurationWithLargeContentViewer
+        }
+        longPressRecognizer?.minimumPressDuration = minimumPressDuration
     }
 
     // MARK: - Selectors
@@ -175,23 +242,44 @@ class ToolbarButton: UIButton, ThemeApplicable {
         if gestureRecognizer.state == .began {
             let generator = UIImpactFeedbackGenerator(style: .heavy)
             generator.impactOccurred()
+
+            // Cancel showing the large content viewer
+            largeContentViewerInteraction?.gestureRecognizerForExclusionRelationship.state = .cancelled
+
             onLongPress?(self)
         }
+    }
+
+    @objc
+    private func largeContentViewerInteractionDidChange() {
+        setMinimumPressDuration()
     }
 
     // MARK: - ThemeApplicable
     public func applyTheme(theme: Theme) {
         let colors = theme.colors
-        foregroundColorNormal = colors.iconPrimary
+        foregroundColorNormal = hasCustomColor ? colors.iconSecondary : colors.iconPrimary
         foregroundColorHighlighted = colors.actionPrimary
         foregroundColorDisabled = colors.iconDisabled
         backgroundColorNormal = .clear
+
+        foregroundTitleColorNormal = colors.textAccent
+        foregroundTitleColorHighlighted = colors.actionPrimaryHover
 
         badgeImageView?.layer.borderColor = colors.layer1.cgColor
         badgeImageView?.backgroundColor = maskImageView == nil ? colors.layer1 : .clear
         badgeImageView?.tintColor = maskImageView == nil ? .clear : colors.actionInformation
         maskImageView?.tintColor = colors.layer1
 
+        layoutIfNeeded()
         setNeedsUpdateConfiguration()
+    }
+
+    // MARK: - UIGestureRecognizerDelegate
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+            let recognizerRelationship = largeContentViewerInteraction?.gestureRecognizerForExclusionRelationship
+            return gestureRecognizer == longPressRecognizer && otherGestureRecognizer == recognizerRelationship
     }
 }

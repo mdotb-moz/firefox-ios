@@ -3,54 +3,65 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/
 
 import Common
-import Shared
 import Storage
-import TabDataStore
 @testable import Client
 
 class DependencyHelperMock {
     func bootstrapDependencies(
+        injectedWindowManager: WindowManager? = nil,
         injectedTabManager: TabManager? = nil,
         injectedMicrosurveyManager: MicrosurveyManager? = nil,
         injectedPocketManager: PocketManagerProvider? = nil
     ) {
         AppContainer.shared.reset()
 
-        let profile: Client.Profile = BrowserProfile(
+        let profile: Profile = BrowserProfile(
             localName: "profile"
         )
-        AppContainer.shared.register(service: profile)
+        AppContainer.shared.register(service: profile as Profile)
+
+        let searchEnginesManager = SearchEnginesManager(
+            prefs: profile.prefs,
+            files: profile.files,
+            engineProvider: MockSearchEngineProvider()
+        )
+        AppContainer.shared.register(service: searchEnginesManager)
 
         let diskImageStore: DiskImageStore = DefaultDiskImageStore(
             files: profile.files,
             namespace: TabManagerConstants.tabScreenshotNamespace,
             quality: UIConstants.ScreenshotQuality)
-        AppContainer.shared.register(service: diskImageStore)
+        AppContainer.shared.register(service: diskImageStore as DiskImageStore)
 
         let windowUUID = WindowUUID.XCTestDefaultUUID
-        let windowManager: WindowManager = MockWindowManager(wrappedManager: WindowManagerImplementation())
+        let windowManager: WindowManager = injectedWindowManager ?? MockWindowManager(
+            wrappedManager: WindowManagerImplementation()
+        )
         let tabManager: TabManager =
         injectedTabManager ?? TabManagerImplementation(profile: profile,
                                                        uuid: ReservedWindowUUID(uuid: windowUUID, isNew: false),
                                                        windowManager: windowManager)
 
         let appSessionProvider: AppSessionProvider = AppSessionManager()
-        AppContainer.shared.register(service: appSessionProvider)
+        AppContainer.shared.register(service: appSessionProvider as AppSessionProvider)
 
         let themeManager: ThemeManager = MockThemeManager()
-        AppContainer.shared.register(service: themeManager)
+        AppContainer.shared.register(service: themeManager as ThemeManager)
 
         let downloadQueue = DownloadQueue()
         AppContainer.shared.register(service: downloadQueue)
 
-        AppContainer.shared.register(service: windowManager)
+        AppContainer.shared.register(service: windowManager as WindowManager)
         windowManager.newBrowserWindowConfigured(AppWindowInfo(tabManager: tabManager), uuid: windowUUID)
 
         let microsurveyManager: MicrosurveyManager = injectedMicrosurveyManager ?? MockMicrosurveySurfaceManager()
-        AppContainer.shared.register(service: microsurveyManager)
+        AppContainer.shared.register(service: microsurveyManager as MicrosurveyManager)
 
         let pocketManager: PocketManagerProvider = injectedPocketManager ?? MockPocketManager()
-        AppContainer.shared.register(service: pocketManager)
+        AppContainer.shared.register(service: pocketManager as PocketManagerProvider)
+
+        let documentLogger = DocumentLogger(logger: MockLogger())
+        AppContainer.shared.register(service: documentLogger)
 
         let gleanUsageReportingMetricsService: GleanUsageReportingMetricsService =
         MockGleanUsageReportingMetricsService(profile: profile)

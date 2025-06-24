@@ -13,7 +13,7 @@ public protocol BottomSheetChild: UIViewController {
 }
 
 /// Protocol followed by the bottom sheet view controller. Gives the possibility to dismiss the bottom sheet.
-public protocol BottomSheetDismissProtocol {
+public protocol BottomSheetDismissProtocol: AnyObject {
     func dismissSheetViewController(completion: (() -> Void)?)
 }
 
@@ -93,7 +93,7 @@ public class BottomSheetViewController: UIViewController,
         setupChildViewController()
 
         let closeButtonViewModel = CloseButtonViewModel(a11yLabel: viewModel.closeButtonA11yLabel,
-                                                        a11yIdentifier: "a11yCloseButton")
+                                                        a11yIdentifier: viewModel.closeButtonA11yIdentifier)
         closeButton.configure(viewModel: closeButtonViewModel)
 
         let gesture = UIPanGestureRecognizer(target: self, action: #selector(panGesture))

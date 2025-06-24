@@ -6,13 +6,13 @@ import Account
 import Foundation
 import Shared
 import Storage
-import Sync
 import XCTest
 
 @testable import Client
 
 import enum MozillaAppServices.SyncReason
 import struct MozillaAppServices.SyncResult
+import class MozillaAppServices.RemoteSettingsService
 
 public typealias ClientSyncManager = Client.SyncManager
 
@@ -34,7 +34,6 @@ open class ClientSyncManagerSpy: ClientSyncManager {
     open func syncTabs() -> Deferred<Maybe<SyncResult>> { return emptySyncResult }
     open func syncHistory() -> Deferred<Maybe<SyncResult>> { return emptySyncResult }
     open func syncEverything(why: SyncReason) -> Success { return succeed() }
-    open func updateCreditCardAutofillStatus(value: Bool) {}
 
     var syncNamedCollectionsCalled = 0
     open func syncNamedCollections(why: SyncReason, names: [String]) -> Success {
@@ -97,9 +96,16 @@ final class MockTabQueue: TabQueue {
 }
 
 class MockFiles: FileAccessor {
-    init() {
-        let docPath = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)[0]
-        super.init(rootPath: (docPath as NSString).appendingPathComponent("testing"))
+    var rootPath: String
+
+    init(rootPath: String? = nil) {
+        guard let rootPath else {
+            let docPath = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)[0]
+            self.rootPath = (docPath as NSString).appendingPathComponent("testing")
+            return
+        }
+
+        self.rootPath = rootPath
     }
 }
 
@@ -113,6 +119,7 @@ open class MockProfile: Client.Profile {
     public var files: FileAccessor
     public var syncManager: ClientSyncManager?
     public var firefoxSuggest: RustFirefoxSuggestProtocol?
+    public var remoteSettingsService: RemoteSettingsService?
 
     fileprivate let name = "mockaccount"
 
@@ -123,6 +130,7 @@ open class MockProfile: Client.Profile {
     init(
         databasePrefix: String = "mock",
         firefoxSuggest: RustFirefoxSuggestProtocol? = nil,
+        remoteSettingService: RemoteSettingsService? = nil,
         injectedPinnedSites: MockablePinnedSites? = nil
     ) {
         files = MockFiles()
@@ -173,10 +181,6 @@ open class MockProfile: Client.Profile {
 
     public lazy var certStore: CertStore = {
         return CertStore()
-    }()
-
-    public lazy var searchEnginesManager: SearchEnginesManager = {
-        return SearchEnginesManager(prefs: self.prefs, files: self.files, engineProvider: MockSearchEngineProvider())
     }()
 
     public lazy var prefs: Prefs = {
@@ -290,7 +294,9 @@ open class MockProfile: Client.Profile {
 
     public func cleanupHistoryIfNeeded() {}
 
-    public func storeTabs(_ tabs: [RemoteTab]) -> Deferred<Maybe<Int>> {
+    var storeAndSyncTabsCalled = 0
+    public func storeAndSyncTabs(_ tabs: [RemoteTab]) -> Deferred<Maybe<Int>> {
+        storeAndSyncTabsCalled += 1
         return deferMaybe(0)
     }
 

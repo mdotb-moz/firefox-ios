@@ -166,13 +166,15 @@ class ShareMenuTests: BaseTestCase {
     private func reachShareMenuLayoutAndSelectOption(option: String, url: String = url_3) {
         // Open a website in the browser
         navigator.openURL(url)
-        waitForTabsButton()
+        waitUntilPageLoad()
         navigator.goto(ToolsBrowserTabMenu)
         // Tap the Share button in the menu
         navigator.performAction(Action.ShareBrowserTabMenuOption)
         if #available(iOS 16, *) {
             mozWaitForElementToExist(app.collectionViews.cells[option])
-            app.collectionViews.cells[option].tapOnApp()
+            app.collectionViews.cells[option].waitAndTap()
+            // Workaround needed for iOS 17 to make sure the element is getting tapped and to avoid using sleeps
+            app.collectionViews.cells[option].tapIfExists()
         } else {
             app.buttons[option].waitAndTap()
         }

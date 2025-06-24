@@ -340,17 +340,15 @@ class BoolSetting: Setting, FeatureFlaggable {
     func switchValueChanged(_ control: UISwitch) {
         writeBool(control)
         settingDidChange?(control.isOn)
-        if let featureFlagName = featureFlagName {
-            TelemetryWrapper.recordEvent(category: .action,
-                                         method: .change,
-                                         object: .setting,
-                                         extras: ["pref": featureFlagName.rawValue as Any,
-                                                  "to": control.isOn])
+
+        if let settingChanged = featureFlagName?.rawValue ?? prefKey {
+            SettingsTelemetry().changedSetting(
+                settingChanged,
+                to: "\(control.isOn)",
+                from: "\(!control.isOn)"
+            )
         } else {
-            TelemetryWrapper.recordEvent(category: .action,
-                                         method: .change,
-                                         object: .setting,
-                                         extras: ["pref": prefKey as Any, "to": control.isOn])
+            assertionFailure("We should be able to get a unique key to describe the changed setting")
         }
     }
 
@@ -503,11 +501,12 @@ class WebPageSetting: StringPrefSetting {
         alignTextFieldToNatural()
     }
 
+    @MainActor
     static func isURLOrEmpty(_ string: String?) -> Bool {
         guard let string = string, !string.isEmpty else {
             return true
         }
-        return URL(string: string, invalidCharacters: false)?.isWebPage() ?? false
+        return URL(string: string)?.isWebPage() ?? false
     }
 }
 
@@ -966,6 +965,14 @@ class SettingsTableViewController: ThemedTableViewController {
                 for: indexPath
             ) as? ThemedCenteredTableViewCell else {
                 return ThemedCenteredTableViewCell()
+            }
+            return cell
+        } else if setting as? SendDataSetting != nil {
+            guard let cell = tableView.dequeueReusableCell(
+                withIdentifier: ThemedLearnMoreTableViewCell.cellIdentifier,
+                for: indexPath
+            ) as? ThemedLearnMoreTableViewCell else {
+                return ThemedLearnMoreTableViewCell()
             }
             return cell
         } else if setting.style == .subtitle {

@@ -4,7 +4,6 @@
 
 import UIKit
 import Common
-import Shared
 import Redux
 
 import enum MozillaAppServices.VisitType
@@ -22,7 +21,9 @@ class RemoteTabsPanel: UIViewController,
                        Themeable,
                        RemoteTabsClientAndTabsDataSourceDelegate,
                        RemoteTabsEmptyViewDelegate,
-                       StoreSubscriber {
+                       StoreSubscriber,
+                       FeatureFlaggable,
+                       TabTrayThemeable {
     typealias SubscriberStateType = RemoteTabsPanelState
 
     // MARK: - Properties
@@ -35,6 +36,12 @@ class RemoteTabsPanel: UIViewController,
     var themeObserver: NSObjectProtocol?
     var notificationCenter: NotificationProtocol
     private let windowUUID: WindowUUID
+    private var isTabTrayUIExperimentsEnabled: Bool {
+        return featureFlags.isFeatureEnabled(.tabTrayUIExperiments, checking: .buildOnly)
+        && UIDevice.current.userInterfaceIdiom != .pad
+    }
+
+    private lazy var statusBarBackground: UIView = .build()
 
     // MARK: - Initializer
 
@@ -77,7 +84,7 @@ class RemoteTabsPanel: UIViewController,
             RemoteTabsPanelActionType.refreshTabs
         let action = RemoteTabsPanelAction(windowUUID: windowUUID,
                                            actionType: actionType)
-        store.dispatch(action)
+        store.dispatchLegacy(action)
     }
 
     // MARK: - View & Layout
@@ -98,19 +105,63 @@ class RemoteTabsPanel: UIViewController,
         view.addSubview(tableViewController.view)
         tableViewController.didMove(toParent: self)
 
-        NSLayoutConstraint.activate([
-            tableViewController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            tableViewController.view.topAnchor.constraint(equalTo: view.topAnchor),
-            tableViewController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            tableViewController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-        ])
+        if isTabTrayUIExperimentsEnabled {
+            view.addSubview(statusBarBackground)
+
+            NSLayoutConstraint.activate([
+                tableViewController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                tableViewController.view.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+                tableViewController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                tableViewController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+
+                statusBarBackground.topAnchor.constraint(equalTo: view.topAnchor),
+                statusBarBackground.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                statusBarBackground.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                statusBarBackground.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor)
+            ])
+        } else {
+            NSLayoutConstraint.activate([
+                tableViewController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                tableViewController.view.topAnchor.constraint(equalTo: view.topAnchor),
+                tableViewController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                tableViewController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            ])
+        }
     }
 
+    // MARK: - Themeable
+
     func applyTheme() {
-        let theme = themeManager.getCurrentTheme(for: windowUUID)
+        let theme = retrieveTheme()
         view.backgroundColor = theme.colors.layer4
-        tableViewController.tableView.backgroundColor =  theme.colors.layer3
+        tableViewController.tableView.backgroundColor = theme.colors.layer3
         tableViewController.tableView.separatorColor = theme.colors.borderPrimary
+        statusBarBackground.backgroundColor = theme.colors.layer3
+    }
+
+    var shouldUsePrivateOverride: Bool {
+        return featureFlags.isFeatureEnabled(.feltPrivacySimplifiedUI, checking: .buildOnly)
+    }
+
+    var shouldBeInPrivateTheme: Bool {
+        return false
+    }
+
+    // MARK: - TabTrayThemeable
+
+    func retrieveTheme() -> Theme {
+        if shouldUsePrivateOverride {
+            return themeManager.resolvedTheme(with: false)
+        } else {
+            return themeManager.getCurrentTheme(for: windowUUID)
+        }
+    }
+
+    func applyTheme(_ theme: Theme) {
+        view.backgroundColor = theme.colors.layer4
+        tableViewController.tableView.backgroundColor = theme.colors.layer3
+        tableViewController.tableView.separatorColor = theme.colors.borderPrimary
+        statusBarBackground.backgroundColor = theme.colors.layer3
     }
 
     // MARK: - Redux
@@ -119,11 +170,11 @@ class RemoteTabsPanel: UIViewController,
         let showScreenAction = ScreenAction(windowUUID: windowUUID,
                                             actionType: ScreenActionType.showScreen,
                                             screen: .remoteTabsPanel)
-        store.dispatch(showScreenAction)
+        store.dispatchLegacy(showScreenAction)
 
         let didAppearAction = RemoteTabsPanelAction(windowUUID: windowUUID,
                                                     actionType: RemoteTabsPanelActionType.panelDidAppear)
-        store.dispatch(didAppearAction)
+        store.dispatchLegacy(didAppearAction)
         let uuid = windowUUID
         store.subscribe(self, transform: {
             $0.select({ appState in
@@ -136,7 +187,7 @@ class RemoteTabsPanel: UIViewController,
         let action = ScreenAction(windowUUID: windowUUID,
                                   actionType: ScreenActionType.closeScreen,
                                   screen: .remoteTabsPanel)
-        store.dispatch(action)
+        store.dispatchLegacy(action)
     }
 
     func newState(state: RemoteTabsPanelState) {
@@ -178,15 +229,11 @@ class RemoteTabsPanel: UIViewController,
         handleOpenSelectedURL(url)
     }
 
-    func remotePanel(didSelectURL url: URL, visitType: VisitType) {
-        handleOpenSelectedURL(url)
-    }
-
     private func handleOpenSelectedURL(_ url: URL) {
         let action = RemoteTabsPanelAction(url: url,
                                            windowUUID: windowUUID,
                                            actionType: RemoteTabsPanelActionType.openSelectedURL)
-        store.dispatch(action)
+        store.dispatchLegacy(action)
     }
 
     private func handleCloseRemoteTab(_ deviceId: String, url: URL) {
@@ -194,7 +241,7 @@ class RemoteTabsPanel: UIViewController,
                                            targetDeviceId: deviceId,
                                            windowUUID: windowUUID,
                                            actionType: RemoteTabsPanelActionType.closeSelectedRemoteURL)
-        store.dispatch(action)
+        store.dispatchLegacy(action)
         // Once we add the tab to the command queue, the rust tab store will start removing it from
         // the list, so refresh the tabs
         refreshTabs(useCache: true)
@@ -205,7 +252,7 @@ class RemoteTabsPanel: UIViewController,
                                            targetDeviceId: deviceId,
                                            windowUUID: windowUUID,
                                            actionType: RemoteTabsPanelActionType.undoCloseSelectedRemoteURL)
-        store.dispatch(action)
+        store.dispatchLegacy(action)
 
         refreshTabs(useCache: true)
     }
@@ -214,7 +261,7 @@ class RemoteTabsPanel: UIViewController,
         let action = RemoteTabsPanelAction(targetDeviceId: deviceId,
                                            windowUUID: windowUUID,
                                            actionType: RemoteTabsPanelActionType.flushTabCommands)
-        store.dispatch(action)
+        store.dispatchLegacy(action)
 
         refreshTabs(useCache: true)
     }

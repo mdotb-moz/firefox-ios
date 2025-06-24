@@ -5,7 +5,6 @@
 import Common
 import Foundation
 import Shared
-import Storage
 import UIKit
 
 protocol PhotonActionSheetProtocol {
@@ -76,9 +75,6 @@ extension PhotonActionSheetProtocol {
             let currentURL = tabManager.selectedTab?.currentURL()
             if let url = tabManager.selectedTab?.canonicalURL?.displayURL ?? currentURL {
                 UIPasteboard.general.url = url
-                SimpleToast().showAlertWithText(.LegacyAppMenu.AppMenuCopyURLConfirmMessage,
-                                                bottomContainer: alertContainer,
-                                                theme: themeManager.getCurrentTheme(for: tabManager.windowUUID))
             }
         }
 

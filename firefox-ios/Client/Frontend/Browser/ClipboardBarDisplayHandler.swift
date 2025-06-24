@@ -101,7 +101,7 @@ class ClipboardBarDisplayHandler: NSObject {
             return true
         }
 
-        if let url = URL(string: clipboardURL, invalidCharacters: false),
+        if let url = URL(string: clipboardURL),
            tabManager?.getTabForURL(url) != nil {
             return true
         }
@@ -111,9 +111,8 @@ class ClipboardBarDisplayHandler: NSObject {
 
     func checkIfShouldDisplayBar() {
         // Clipboard bar feature needs to be enabled by users to be activated in the user settings
-        guard
-            prefs.boolForKey("showClipboardBar") ?? false,
-            UIPasteboard.general.hasURLs
+        guard prefs.boolForKey(PrefsKeys.ShowClipboardBar) ?? false,
+              UIPasteboard.general.hasURLs
         else { return }
 
         if #available(iOS 16.0, *) {

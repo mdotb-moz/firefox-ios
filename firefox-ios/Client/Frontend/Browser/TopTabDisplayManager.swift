@@ -47,7 +47,8 @@ protocol TabDisplayerDelegate: AnyObject {
 
 // Regular tab order persistence for TabDisplayManager
 struct TabDisplayOrder: Codable {
-    static let defaults = UserDefaults(suiteName: AppInfo.sharedContainerIdentifier)!
+    // TODO: FXIOS-12589 UserDefaults is not Sendable
+    nonisolated(unsafe) static let defaults = UserDefaults(suiteName: AppInfo.sharedContainerIdentifier)!
     var regularTabUUID: [TabUUID] = []
 }
 
@@ -67,6 +68,7 @@ class TopTabDisplayManager: NSObject {
     }
 
     // MARK: - Variables
+    let tabsPanelTelemetry: TabsPanelTelemetry
     private var performingChainedOperations = false
     var isInactiveViewExpanded = false
     var dataStore = WeakList<Tab>()
@@ -176,7 +178,8 @@ class TopTabDisplayManager: NSObject {
          tabManager: TabManager,
          tabDisplayer: TabDisplayerDelegate,
          reuseID: String,
-         profile: Profile
+         profile: Profile,
+         gleanWrapper: GleanWrapper = DefaultGleanWrapper()
     ) {
         self.collectionView = collectionView
         self.tabDisplayerDelegate = tabDisplayer
@@ -185,11 +188,11 @@ class TopTabDisplayManager: NSObject {
         self.tabReuseIdentifier = reuseID
         self.profile = profile
         self.notificationCenter = NotificationCenter.default
+        self.tabsPanelTelemetry = TabsPanelTelemetry(gleanWrapper: gleanWrapper)
 
         super.init()
         setupNotifications(forObserver: self, observing: [.DidTapUndoCloseAllTabToast])
         tabManager.addDelegate(self)
-        register(self, forTabEvents: .didChangeURL, .didSetScreenshot)
         self.dataStore.removeAll()
         getTabs { [weak self] tabsToDisplay in
             guard let self, !tabsToDisplay.isEmpty else { return }
@@ -323,17 +326,9 @@ class TopTabDisplayManager: NSObject {
     func performCloseAction(for tab: Tab) {
         guard !isDragging else { return }
 
-        getTabs { [weak self] tabsToDisplay in
-            guard let self else { return }
-            // If it is the last tab of regular mode we automatically create an new tab
-            if !self.isPrivate,
-               tabsToDisplay.count == 1 {
-                self.tabManager.removeTabs([tab])
-                self.tabManager.selectTab(self.tabManager.addTab())
-                return
-            }
-
-            self.tabManager.removeTab(tab)
+        getTabs { [weak self] _ in
+            self?.tabsPanelTelemetry.tabClosed(mode: tab.isPrivate ? .private : .normal)
+            self?.tabManager.removeTabWithCompletion(tab.tabUUID, completion: nil)
         }
     }
 
@@ -708,6 +703,10 @@ extension TopTabDisplayManager: TabManagerDelegate {
 
     func tabManagerDidRemoveAllTabs(_ tabManager: TabManager, toast: ButtonToast?) {
         cancelDragAndGestures()
+    }
+
+    func tabManagerTabDidFinishLoading() {
+        refreshStore()
     }
 }
 

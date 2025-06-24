@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/
 
-import Common
 import Foundation
 
 /// Those extensions are kept public at the moment to avoid breaking any existing code, but ideally
@@ -26,7 +25,7 @@ public extension URL {
                let queryItems = components.queryItems {
                 if let queryItem = queryItems.first(where: { $0.name == "url" }),
                    let value = queryItem.value {
-                    return URL(string: value, invalidCharacters: false)?.safeEncodedUrl
+                    return URL(string: value)?.safeEncodedUrl
                 }
             }
         }
@@ -35,7 +34,7 @@ public extension URL {
 
     func encodeReaderModeURL(_ baseReaderModeURL: String) -> URL? {
         if let encodedURL = absoluteString.addingPercentEncoding(withAllowedCharacters: .alphanumerics) {
-            if let aboutReaderURL = URL(string: "\(baseReaderModeURL)?url=\(encodedURL)", invalidCharacters: false) {
+            if let aboutReaderURL = URL(string: "\(baseReaderModeURL)?url=\(encodedURL)") {
                 return aboutReaderURL
             }
         }

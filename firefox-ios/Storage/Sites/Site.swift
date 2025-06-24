@@ -3,7 +3,6 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/
 
 import UIKit
-import Shared
 import SiteImageView
 
 public struct Site: Identifiable, Hashable, Equatable, Codable, CustomStringConvertible, CustomDebugStringConvertible {
@@ -33,15 +32,15 @@ public struct Site: Identifiable, Hashable, Equatable, Codable, CustomStringConv
     public var tileURL: URL {
         switch type {
         case .suggestedSite:
-            return URL(string: url, invalidCharacters: false) ?? URL(string: "about:blank")!
+            return URL(string: url) ?? URL(string: "about:blank")!
         default:
-            return URL(string: url, invalidCharacters: false)?.domainURL ?? URL(string: "about:blank")!
+            return URL(string: url)?.domainURL ?? URL(string: "about:blank")!
         }
     }
 
     /// Gets the second level domain (i.e. `http://www.example.com/` --> `example`).
     public var secondLevelDomain: String? {
-        return URL(string: url, invalidCharacters: false)?.host?.components(separatedBy: ".").suffix(2).first
+        return URL(string: url)?.host?.components(separatedBy: ".").suffix(2).first
     }
 
     public var faviconImageCacheKey: String {
@@ -54,7 +53,7 @@ public struct Site: Identifiable, Hashable, Equatable, Codable, CustomStringConv
         id: Int? = nil,
         url: String,
         title: String,
-        isBookmarked: Bool? = nil,
+        isBookmarked: Bool? = false,
         faviconResource: SiteResource? = nil
     ) -> Site {
         var site = Site(id: id ?? UUID().hashValue, url: url, title: title, type: .basic)

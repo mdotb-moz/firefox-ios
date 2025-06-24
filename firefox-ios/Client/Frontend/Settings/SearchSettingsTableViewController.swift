@@ -82,11 +82,12 @@ final class SearchSettingsTableViewController: ThemedTableViewController, Featur
     }
 
     init(profile: Profile,
+         searchEnginesManager: SearchEnginesManager = AppContainer.shared.resolve(),
          windowUUID: WindowUUID,
          logger: Logger = DefaultLogger.shared) {
         self.profile = profile
         self.logger = logger
-        model = profile.searchEnginesManager
+        model = searchEnginesManager
 
         super.init(windowUUID: windowUUID)
     }
@@ -214,8 +215,7 @@ final class SearchSettingsTableViewController: ThemedTableViewController, Featur
                 )
 
             case SearchSuggestItem.privateSuggestions.rawValue:
-                if featureFlags.isFeatureEnabled(.feltPrivacySimplifiedUI, checking: .buildOnly),
-                   !featureFlags.isFeatureEnabled(.firefoxSuggestFeature, checking: .buildAndUser) {
+                if featureFlags.isFeatureEnabled(.feltPrivacySimplifiedUI, checking: .buildOnly) {
                     buildSettingWith(
                         prefKey: PrefsKeys.SearchSettings.showPrivateModeSearchSuggestions,
                         defaultValue: model.shouldShowPrivateModeSearchSuggestions,
@@ -361,8 +361,7 @@ final class SearchSettingsTableViewController: ThemedTableViewController, Featur
             // But the option to add a Search Engine is.
             return model.orderedEngines.count
         case .searchEnginesSuggestions:
-            return featureFlags.isFeatureEnabled(.feltPrivacySimplifiedUI, checking: .buildOnly) &&
-            !featureFlags.isFeatureEnabled(.firefoxSuggestFeature, checking: .buildAndUser)
+            return featureFlags.isFeatureEnabled(.feltPrivacySimplifiedUI, checking: .buildOnly)
             ? SearchSuggestItem.allCases.count : 1
         case .firefoxSuggestSettings:
             return featureFlags.isFeatureEnabled(.firefoxSuggestFeature, checking: .buildAndUser)
@@ -706,13 +705,16 @@ extension SearchSettingsTableViewController: SearchEnginePickerDelegate {
         didSelectSearchEngine searchEngine: OpenSearchEngine?
     ) {
         if let engine = searchEngine {
+            let previousEngine = model.defaultEngine
             model.defaultEngine = engine
             NotificationCenter.default.post(name: .SearchSettingsDidUpdateDefaultSearchEngine)
             self.tableView.reloadData()
 
-            let extras = [TelemetryWrapper.EventExtraKey.preference.rawValue: "defaultSearchEngine",
-                          TelemetryWrapper.EventExtraKey.preferenceChanged.rawValue: engine.engineID ?? "custom"]
-            TelemetryWrapper.recordEvent(category: .action, method: .change, object: .setting, extras: extras)
+            SettingsTelemetry().changedSetting(
+                "defaultSearchEngine",
+                to: engine.telemetryID,
+                from: previousEngine?.telemetryID ?? SettingsTelemetry.Placeholders.missingValue
+            )
         }
         _ = navigationController?.popViewController(animated: true)
     }

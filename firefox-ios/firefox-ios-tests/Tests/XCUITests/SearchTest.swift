@@ -16,8 +16,8 @@ private let SuggestedSite6 = "foobar bomb baby"
 
 class SearchTests: BaseTestCase {
     private func typeOnSearchBar(text: String) {
-        app.textFields.firstMatch.waitAndTap()
-        app.textFields.firstMatch.tapAndTypeText(text)
+        app.textFields[AccessibilityIdentifiers.Browser.AddressToolbar.searchTextField].waitAndTap()
+        app.textFields[AccessibilityIdentifiers.Browser.AddressToolbar.searchTextField].tapAndTypeText(text)
     }
 
     private func suggestionsOnOff() {
@@ -34,7 +34,7 @@ class SearchTests: BaseTestCase {
         typeOnSearchBar(text: typeText)
 
         // In the search suggestion, "text" should be displayed
-        let predicate = NSPredicate(format: "label CONTAINS[c] %@", "http://localhost:")
+        let predicate = NSPredicate(format: "label CONTAINS[c] %@", "localhost")
         let elementQuery = app.staticTexts.containing(predicate)
         mozWaitForElementToExist(elementQuery.element)
     }
@@ -126,7 +126,8 @@ class SearchTests: BaseTestCase {
         // Copy, Paste and Go to url
         navigator.goto(URLBarOpen)
         typeOnSearchBar(text: "www.mozilla.org")
-        if iPad() {
+        if #available(iOS 17, *), ProcessInfo.processInfo.operatingSystemVersion.majorVersion == 17
+            || iPad() {
             urlBarAddress.waitAndTap()
             urlBarAddress.waitAndTap()
         } else {
@@ -276,7 +277,7 @@ class SearchTests: BaseTestCase {
             mozWaitForElementToExist(app.buttons[AccessibilityIdentifiers.Toolbar.addNewTabButton])
             XCTAssertEqual(app.buttons[AccessibilityIdentifiers.Toolbar.addNewTabButton].label, "New Tab")
             app.buttons[AccessibilityIdentifiers.Toolbar.addNewTabButton].waitAndTap()
-            navigator.performAction(Action.CloseURLBarOpen)
+            app.buttons[AccessibilityIdentifiers.Browser.UrlBar.cancelButton].waitAndTap()
             XCTAssertEqual(app.buttons[AccessibilityIdentifiers.Toolbar.searchButton].label, "Search")
             app.buttons[AccessibilityIdentifiers.Toolbar.searchButton].waitAndTap()
 
@@ -324,7 +325,7 @@ class SearchTests: BaseTestCase {
             let customizeHomepageElement = AccessibilityIdentifiers.FirefoxHomepage.MoreButtons.customizeHomePage
             let customizeHomepage = app.cells.otherElements.buttons[customizeHomepageElement]
             let menuSettingsButton = app.buttons[AccessibilityIdentifiers.Toolbar.settingsMenuButton]
-            scrollToElement(customizeHomepage)
+            app.swipeUp()
             mozWaitForElementToExist(customizeHomepage)
             let urlBar = app.textFields[AccessibilityIdentifiers.Browser.AddressToolbar.searchTextField]
             XCTAssertTrue(urlBar.isBelow(element: customizeHomepage))
@@ -406,6 +407,37 @@ class SearchTests: BaseTestCase {
         typeTextAndValidateSearchSuggestions(text: "g", isSwitchOn: true)
     }
 
+    // https://mozilla.testrail.io/index.php?/cases/view/2576803
+    func testFirefoxSuggest() {
+        // In history: mozilla.org
+        navigator.openURL("https://www.mozilla.org/en-US/")
+        waitUntilPageLoad()
+
+        // Bookmark The Book of Mozilla (on localhost)
+        navigator.openNewURL(urlString: "localhost:\(serverPort)/test-fixture/test-mozilla-book.html")
+        waitUntilPageLoad()
+        navigator.goto(BrowserTabMenu)
+        navigator.goto(SaveBrowserTabMenu)
+        navigator.performAction(Action.Bookmark)
+
+        // Close all tabs so that the search result does not include
+        // current tabs.
+        navigator.performAction(Action.AcceptRemovingAllTabs)
+
+        // Type partial match ("mo") of the history and the bookmark
+        navigator.goto(NewTabScreen)
+        typeOnSearchBar(text: "mo")
+
+        // Google Search appears
+        mozWaitForElementToExist(app.tables["SiteTable"].otherElements["Google Search"])
+        mozWaitForElementToExist(app.tables["SiteTable"].buttons[StandardImageIdentifiers.Large.appendUpLeft])
+
+        // Firefox Suggest appears
+        mozWaitForElementToExist(app.tables["SiteTable"].otherElements["Firefox Suggest"])
+        mozWaitForElementToExist(app.tables["SiteTable"].staticTexts["The Book of Mozilla"]) // Bookmark
+        mozWaitForElementToExist(app.tables["SiteTable"].staticTexts["www.mozilla.org/"]) // History
+    }
+
     private func turnOnOffSearchSuggestions(turnOnSwitch: Bool) {
         let showSearchSuggestions = app.switches[AccessibilityIdentifiers.Settings.Search.showSearchSuggestions]
         mozWaitForElementToExist(showSearchSuggestions)
@@ -428,16 +460,20 @@ class SearchTests: BaseTestCase {
     private func typeTextAndValidateSearchSuggestions(text: String, isSwitchOn: Bool) {
         typeOnSearchBar(text: text)
         // Search suggestions are shown
+        let appendArrowBtn = app.tables.cells.buttons.matching(identifier: "appendUpLeftLarge")
         if isSwitchOn {
             mozWaitForElementToExist(app.staticTexts.elementContainingText("google"))
+            mozWaitForElementToExist(app.tables["SiteTable"].staticTexts["Google Search"])
             XCTAssertTrue(app.staticTexts.elementContainingText("google").exists)
             mozWaitForElementToExist(app.tables.cells.staticTexts["g"])
-            XCTAssertTrue(app.tables.cells.count >= 4)
+            XCTAssertTrue(appendArrowBtn.count == 3)
         } else {
             mozWaitForElementToNotExist(app.tables.buttons[StandardImageIdentifiers.Large.appendUpLeft])
             mozWaitForElementToExist(app.tables["SiteTable"].staticTexts["Firefox Suggest"])
             mozWaitForElementToExist(app.tables.cells.firstMatch)
-            XCTAssertTrue(app.tables.cells.count <= 3)
+            // If "Append Arrow buttons" are missing, then google search suggestions are missing
+            mozWaitForElementToNotExist(appendArrowBtn.element)
+            mozWaitForElementToNotExist(app.tables.cells.staticTexts["g"])
         }
     }
 

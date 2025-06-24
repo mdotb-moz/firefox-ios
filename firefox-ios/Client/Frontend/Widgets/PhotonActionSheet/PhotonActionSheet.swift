@@ -3,7 +3,6 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/
 
 import Foundation
-import Storage
 import Shared
 import UIKit
 import Common
@@ -319,8 +318,11 @@ class PhotonActionSheet: UIViewController, Themeable {
                                change: [NSKeyValueChangeKey: Any]?,
                                context: UnsafeMutableRawPointer?) {
         if viewModel.presentationStyle == .popover && !wasHeightOverridden {
-            let size = view.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
-            preferredContentSize = CGSize(width: size.width, height: tableView.contentSize.height)
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                let size = view.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
+                preferredContentSize = CGSize(width: size.width, height: tableView.contentSize.height)
+            }
         }
     }
 

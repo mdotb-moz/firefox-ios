@@ -5,7 +5,7 @@
 import Foundation
 import Shared
 
-private var ignoredSchemes = ["about"]
+private let ignoredSchemes = ["about"]
 
 public func isIgnoredURL(_ url: URL) -> Bool {
     guard let scheme = url.scheme else { return false }
@@ -18,7 +18,7 @@ public func isIgnoredURL(_ url: URL) -> Bool {
 }
 
 public func isIgnoredURL(_ url: String) -> Bool {
-    if let url = URL(string: url, invalidCharacters: false) {
+    if let url = URL(string: url) {
         return isIgnoredURL(url)
     }
 

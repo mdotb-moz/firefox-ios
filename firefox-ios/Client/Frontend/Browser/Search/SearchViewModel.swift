@@ -17,16 +17,15 @@ class SearchViewModel: FeatureFlaggable, LoaderListener {
     private var profile: Profile
     private var tabManager: TabManager
     private var suggestClient: SearchSuggestClient?
-    private var highlightManager: HistoryHighlightsManagerProtocol
 
     var remoteClientTabs = [ClientTabsSearchWrapper]()
     var filteredRemoteClientTabs = [ClientTabsSearchWrapper]()
     var filteredOpenedTabs = [Tab]()
-    var searchHighlights = [HighlightItem]()
     var firefoxSuggestions = [RustFirefoxSuggestion]()
     let model: SearchEnginesManager
     var suggestions: [String]? = []
-    static var userAgent: String?
+    // TODO: FXIOS-12588 This global property is not concurrency safe
+    nonisolated(unsafe) static var userAgent: String?
     var searchFeature: FeatureHolder<Search>
     private var searchTelemetry: SearchTelemetry
 
@@ -129,8 +128,8 @@ class SearchViewModel: FeatureFlaggable, LoaderListener {
     private var hasHistoryAndBookmarksSuggestions: Bool {
         let dataCount = delegate?.searchData.count
         return dataCount != 0 &&
-        shouldShowBookmarksSuggestions &&
-        shouldShowBrowsingHistorySuggestions
+        hasBookmarksSuggestions &&
+        hasHistorySuggestions
     }
 
     var hasFirefoxSuggestions: Bool {
@@ -139,7 +138,6 @@ class SearchViewModel: FeatureFlaggable, LoaderListener {
                || hasHistoryAndBookmarksSuggestions
                || !filteredOpenedTabs.isEmpty
                || (!filteredRemoteClientTabs.isEmpty && shouldShowSyncedTabsSuggestions)
-               || !searchHighlights.isEmpty
                || (!firefoxSuggestions.isEmpty && (shouldShowNonSponsoredSuggestions
                                                    || shouldShowSponsoredSuggestions))
     }
@@ -148,8 +146,7 @@ class SearchViewModel: FeatureFlaggable, LoaderListener {
          profile: Profile,
          model: SearchEnginesManager,
          tabManager: TabManager,
-         featureConfig: FeatureHolder<Search> = FxNimbus.shared.features.search,
-         highlightManager: HistoryHighlightsManagerProtocol = HistoryHighlightsManager()
+         featureConfig: FeatureHolder<Search> = FxNimbus.shared.features.search
     ) {
         self.isPrivate = isPrivate
         self.isBottomSearchBar = isBottomSearchBar
@@ -157,7 +154,6 @@ class SearchViewModel: FeatureFlaggable, LoaderListener {
         self.model = model
         self.tabManager = tabManager
         self.searchFeature = featureConfig
-        self.highlightManager = highlightManager
         self.searchTelemetry = SearchTelemetry(tabManager: tabManager)
     }
 
@@ -172,20 +168,6 @@ class SearchViewModel: FeatureFlaggable, LoaderListener {
         }
     }
 
-    private func loadSearchHighlights() {
-        guard featureFlags.isFeatureEnabled(.searchHighlights, checking: .buildOnly) else { return }
-
-        highlightManager.searchHighlightsData(
-            searchQuery: searchQuery,
-            profile: profile,
-            tabs: tabManager.tabs,
-            resultCount: 3) { results in
-            guard let results = results else { return }
-            self.searchHighlights = results
-            self.delegate?.reloadTableView()
-        }
-    }
-
     func querySuggestClient() {
         suggestClient?.cancelPendingRequest()
 
@@ -196,7 +178,6 @@ class SearchViewModel: FeatureFlaggable, LoaderListener {
             return
         }
 
-        loadSearchHighlights()
         _ = loadFirefoxSuggestions()
 
         let tempSearchQuery = searchQuery
@@ -244,12 +225,11 @@ class SearchViewModel: FeatureFlaggable, LoaderListener {
         profile.firefoxSuggest?.interruptReader()
 
         let tempSearchQuery = searchQuery
-        let providers = [.amp, .ampMobile, .wikipedia]
+        let providers = [.amp, .wikipedia]
             .filter { NimbusFirefoxSuggestFeatureLayer().isSuggestionProviderAvailable($0) }
             .filter {
                 switch $0 {
                 case .amp: includeSponsored
-                case .ampMobile: includeSponsored
                 case .wikipedia: includeNonSponsored
                 default: false
                 }

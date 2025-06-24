@@ -4,11 +4,10 @@
 
 import Common
 import Redux
-import ToolbarKit
 import Account
 import Shared
 
-final class MainMenuMiddleware {
+final class MainMenuMiddleware: FeatureFlaggable {
     private enum TelemetryAction {
         static let newTab = "new_tab"
         static let newPrivateTab = "new_private_tab"
@@ -47,6 +46,10 @@ final class MainMenuMiddleware {
     private let logger: Logger
     private let telemetry = MainMenuTelemetry()
 
+    private var isMenuRedesignOn: Bool {
+        featureFlags.isFeatureEnabled(.menuRedesign, checking: .buildOnly)
+    }
+
     init(logger: Logger = DefaultLogger.shared) {
         self.logger = logger
     }
@@ -55,63 +58,67 @@ final class MainMenuMiddleware {
         guard let action = action as? MainMenuAction else { return }
         let isHomepage = action.telemetryInfo?.isHomepage ?? false
 
+        self.handleMainMenuActions(action: action, isHomepage: isHomepage)
+    }
+
+    private func handleMainMenuActions(action: MainMenuAction, isHomepage: Bool) {
         switch action.actionType {
         case MainMenuActionType.tapNavigateToDestination:
-            self.handleTapNavigateToDestinationAction(action: action, isHomepage: isHomepage)
+            handleTapNavigateToDestinationAction(action: action, isHomepage: isHomepage)
 
         case MainMenuActionType.tapShowDetailsView:
-            self.handleTapShowDetailsViewAction(action: action, isHomepage: isHomepage)
+            handleTapShowDetailsViewAction(action: action, isHomepage: isHomepage)
 
         case MainMenuActionType.tapToggleUserAgent:
-            self.handleTapToggleUserAgentAction(action: action, isHomepage: isHomepage)
+            handleTapToggleUserAgentAction(action: action, isHomepage: isHomepage)
 
         case MainMenuActionType.tapCloseMenu:
-            self.telemetry.closeButtonTapped(isHomepage: isHomepage)
+            telemetry.closeButtonTapped(isHomepage: isHomepage)
 
         case GeneralBrowserActionType.showReaderMode:
-            self.handleShowReaderModeAction(action: action)
+            handleShowReaderModeAction(action: action)
 
         case MainMenuActionType.didInstantiateView:
-            self.handleDidInstantiateViewAction(action: action)
+            handleDidInstantiateViewAction(action: action)
 
         case MainMenuActionType.viewDidLoad:
-            self.handleViewDidLoadAction(action: action)
+            handleViewDidLoadAction(action: action)
 
         case MainMenuActionType.menuDismissed:
-            self.telemetry.menuDismissed(isHomepage: isHomepage)
+            telemetry.menuDismissed(isHomepage: isHomepage)
 
         case MainMenuDetailsActionType.tapZoom:
-            self.telemetry.toolsSubmenuOptionTapped(with: isHomepage, and: TelemetryAction.zoom)
+            telemetry.toolsSubmenuOptionTapped(with: isHomepage, and: TelemetryAction.zoom)
 
         case MainMenuDetailsActionType.tapReportBrokenSite:
-            self.telemetry.toolsSubmenuOptionTapped(with: isHomepage, and: TelemetryAction.reportBrokenSite)
+            telemetry.toolsSubmenuOptionTapped(with: isHomepage, and: TelemetryAction.reportBrokenSite)
 
         case MainMenuDetailsActionType.tapAddToBookmarks:
-            self.telemetry.saveSubmenuOptionTapped(with: isHomepage, and: TelemetryAction.bookmarkThisPage)
+            telemetry.saveSubmenuOptionTapped(with: isHomepage, and: TelemetryAction.bookmarkThisPage)
 
         case MainMenuDetailsActionType.tapEditBookmark:
-            self.telemetry.saveSubmenuOptionTapped(with: isHomepage, and: TelemetryAction.editBookmark)
+            telemetry.saveSubmenuOptionTapped(with: isHomepage, and: TelemetryAction.editBookmark)
 
         case MainMenuDetailsActionType.tapAddToShortcuts:
-            self.telemetry.saveSubmenuOptionTapped(with: isHomepage, and: TelemetryAction.addToShortcuts)
+            telemetry.saveSubmenuOptionTapped(with: isHomepage, and: TelemetryAction.addToShortcuts)
 
         case MainMenuDetailsActionType.tapRemoveFromShortcuts:
-            self.telemetry.saveSubmenuOptionTapped(with: isHomepage, and: TelemetryAction.removeFromShortcuts)
+            telemetry.saveSubmenuOptionTapped(with: isHomepage, and: TelemetryAction.removeFromShortcuts)
 
         case MainMenuDetailsActionType.tapAddToReadingList:
-            self.telemetry.saveSubmenuOptionTapped(with: isHomepage, and: TelemetryAction.saveToReadingList)
+            telemetry.saveSubmenuOptionTapped(with: isHomepage, and: TelemetryAction.saveToReadingList)
 
         case MainMenuDetailsActionType.tapRemoveFromReadingList:
-            self.telemetry.saveSubmenuOptionTapped(with: isHomepage, and: TelemetryAction.removeFromReadingList)
+            telemetry.saveSubmenuOptionTapped(with: isHomepage, and: TelemetryAction.removeFromReadingList)
 
-        case MainMenuDetailsActionType.tapToggleNightMode:
-            self.handleTapToggleNightModeAction(action: action, isHomepage: isHomepage)
+        case MainMenuDetailsActionType.tapToggleNightMode, MainMenuActionType.tapToggleNightMode:
+            handleTapToggleNightModeAction(action: action, isHomepage: isHomepage)
 
         case MainMenuDetailsActionType.tapBackToMainMenu:
-            self.handleTapBackToMainMenuAction(action: action, isHomepage: isHomepage)
+            handleTapBackToMainMenuAction(action: action, isHomepage: isHomepage)
 
         case MainMenuDetailsActionType.tapDismissView:
-            self.telemetry.closeButtonTapped(isHomepage: isHomepage)
+            telemetry.closeButtonTapped(isHomepage: isHomepage)
 
         default: break
         }
@@ -152,20 +159,22 @@ final class MainMenuMiddleware {
     }
 
     private func handleDidInstantiateViewAction(action: MainMenuAction) {
-        if let accountData = getAccountData() {
-            if let iconURL = accountData.iconURL {
-                GeneralizedImageFetcher().getImageFor(url: iconURL) { [weak self] image in
-                    guard let self else { return }
-                    self.dispatchUpdateAccountHeader(
-                        accountData: accountData,
-                        action: action,
-                        icon: image)
-                }
-            } else {
-                dispatchUpdateAccountHeader(accountData: accountData, action: action)
+        guard !isMenuRedesignOn else { return }
+        guard let accountData = getAccountData() else {
+            dispatchUpdateAccountHeader(action: action)
+            return
+        }
+
+        if let iconURL = accountData.iconURL {
+            GeneralizedImageFetcher().getImageFor(url: iconURL) { [weak self] image in
+                guard let self else { return }
+                self.dispatchUpdateAccountHeader(
+                    accountData: accountData,
+                    action: action,
+                    icon: image)
             }
         } else {
-            dispatchUpdateAccountHeader(action: action)
+            dispatchUpdateAccountHeader(accountData: accountData, action: action)
         }
     }
 
@@ -174,7 +183,7 @@ final class MainMenuMiddleware {
         action: MainMenuAction,
         icon: UIImage? = nil
     ) {
-        store.dispatch(
+        store.dispatchLegacy(
             MainMenuAction(
                 windowUUID: action.windowUUID,
                 actionType: MainMenuMiddlewareActionType.updateAccountHeader,
@@ -185,10 +194,16 @@ final class MainMenuMiddleware {
     }
 
     private func handleViewDidLoadAction(action: MainMenuAction) {
-        store.dispatch(
+        store.dispatchLegacy(
             MainMenuAction(
                 windowUUID: action.windowUUID,
                 actionType: MainMenuMiddlewareActionType.requestTabInfo
+            )
+        )
+        store.dispatchLegacy(
+            MainMenuAction(
+                windowUUID: action.windowUUID,
+                actionType: MainMenuMiddlewareActionType.requestTabInfoForSiteProtectionsHeader
             )
         )
     }
@@ -224,7 +239,7 @@ final class MainMenuMiddleware {
 
         var iconURL: URL?
         if let str = rustAccount.userProfile?.avatarUrl,
-           let url = URL(string: str, invalidCharacters: false) {
+           let url = URL(string: str) {
             iconURL = url
         }
 
@@ -289,6 +304,9 @@ final class MainMenuMiddleware {
 
         case .zoom:
             self.telemetry.toolsSubmenuOptionTapped(with: isHomepage, and: TelemetryAction.zoom)
+
+        case .siteProtections: break
+            // TODO: FXIOS-12554 [Menu Redesign] Handle Telemetry for menu
         }
     }
 }

@@ -5,7 +5,6 @@
 import UIKit
 import Storage
 import Common
-import Shared
 
 struct SiteTableViewControllerUX {
     static let RowHeight: CGFloat = 44
@@ -206,10 +205,8 @@ extension SiteTableViewController: UITableViewDragDelegate {
     ) -> [UIDragItem] {
         guard let panelVC = self as? LibraryPanelContextMenu,
               let site = panelVC.getSiteDetails(for: indexPath),
-              let url = URL(
-                string: site.url,
-                invalidCharacters: false
-              ), let itemProvider = NSItemProvider(contentsOf: url)
+              let url = URL(string: site.url),
+              let itemProvider = NSItemProvider(contentsOf: url)
         else { return [] }
 
         // Telemetry is being sent to legacy, need to add it to metrics.yml

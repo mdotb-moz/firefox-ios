@@ -16,19 +16,34 @@ class AppDelegate: UIResponder, UIApplicationDelegate, FeatureFlaggable {
     var notificationCenter: NotificationProtocol = NotificationCenter.default
     var orientationLock = UIInterfaceOrientationMask.all
 
-    private let creditCardAutofillStatus = FxNimbus.shared
+    private let rustKeychainEnabled = FxNimbus.shared
         .features
-        .creditCardAutofill
+        .rustKeychainRefactor
         .value()
-        .creditCardAutofillStatus
+        .rustKeychainEnabled
+
+    private let loginsVerificationEnabled = FxNimbus.shared
+        .features
+        .loginsVerification
+        .value()
+        .loginsVerificationEnabled
 
     lazy var profile: Profile = BrowserProfile(
         localName: "profile",
         fxaCommandsDelegate: UIApplication.shared.fxaCommandsDelegate,
-        creditCardAutofillEnabled: creditCardAutofillStatus
+        rustKeychainEnabled: rustKeychainEnabled,
+        loginsVerificationEnabled: loginsVerificationEnabled)
+
+    lazy var searchEnginesManager = SearchEnginesManager(
+        prefs: profile.prefs,
+        files: profile.files
     )
 
-    lazy var themeManager: ThemeManager = DefaultThemeManager(sharedContainerIdentifier: AppInfo.sharedContainerIdentifier)
+    lazy var themeManager: ThemeManager = DefaultThemeManager(
+        sharedContainerIdentifier: AppInfo.sharedContainerIdentifier,
+        isNewAppearanceMenuOnClosure: { self.featureFlags.isFeatureEnabled(.appearanceMenu, checking: .buildOnly) }
+    )
+    lazy var documentLogger = DocumentLogger(logger: logger)
     lazy var appSessionManager: AppSessionProvider = AppSessionManager()
     lazy var notificationSurfaceManager = NotificationSurfaceManager()
     lazy var tabDataStore = DefaultTabDataStore()
@@ -80,6 +95,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate, FeatureFlaggable {
             .browserIsReady
         ])
 
+        // Initialize the feature flag subsystem.
+        // Among other things, it toggles on and off Nimbus, Contile, Adjust.
+        // i.e. this must be run before initializing those systems.
+        LegacyFeatureFlagsManager.shared.initializeDeveloperFeatures(with: profile)
+
         // Then setup dependency container as it's needed for everything else
         DependencyHelper().bootstrapDependencies()
 
@@ -101,16 +121,16 @@ class AppDelegate: UIResponder, UIApplicationDelegate, FeatureFlaggable {
     }
 
     private func startRecordingStartupOpenURLTime() {
-        shareTelemetry.recordOpenURLTime()
+        shareTelemetry.recordOpenDeeplinkTime()
         var recordCompleteToken: ActionToken?
         var recordCancelledToken: ActionToken?
-        recordCompleteToken = AppEventQueue.wait(for: .recordStartupTimeOpenURLComplete) { [weak self] in
-            self?.shareTelemetry.sendOpenURLTimeRecord()
+        recordCompleteToken = AppEventQueue.wait(for: .recordStartupTimeOpenDeeplinkComplete) { [weak self] in
+            self?.shareTelemetry.sendOpenDeeplinkTimeRecord()
             guard let recordCancelledToken, let recordCompleteToken  else { return }
             AppEventQueue.cancelAction(token: recordCancelledToken)
             AppEventQueue.cancelAction(token: recordCompleteToken)
         }
-        recordCancelledToken = AppEventQueue.wait(for: .recordStartupTimeOpenURLCancelled) { [weak self] in
+        recordCancelledToken = AppEventQueue.wait(for: .recordStartupTimeOpenDeeplinkCancelled) { [weak self] in
             self?.shareTelemetry.cancelOpenURLTimeRecord()
             guard let recordCancelledToken, let recordCompleteToken  else { return }
             AppEventQueue.cancelAction(token: recordCancelledToken)
@@ -184,9 +204,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, FeatureFlaggable {
 
         // Cleanup can be a heavy operation, take it out of the startup path. Instead check after a few seconds.
         DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
-            if self?.featureFlags.isFeatureEnabled(.cleanupHistoryReenabled, checking: .buildOnly) ?? false {
-                self?.profile.cleanupHistoryIfNeeded()
-            }
+            self?.profile.cleanupHistoryIfNeeded()
         }
 
         DispatchQueue.global().async { [weak self] in
@@ -195,7 +213,15 @@ class AppDelegate: UIResponder, UIApplicationDelegate, FeatureFlaggable {
 
         updateWallpaperMetadata()
         loadBackgroundTabs()
-
+        /// On first run (when suggest‑data.db is empty) this populates the db; later calls are no‑ops due to `emptyOnly`.
+        /// For details, see:
+        ///     https://github.com/mozilla/application-services/blob/5aade8c09653ad2a2ec02746dc6bcf80dc8434c2/components/suggest/src/store.rs#L597-L599
+        /// Actual periodic refreshing happens in the background in `BackgroundFirefoxSuggestIngestUtility.swift`.
+        /// `.utility` priority is used here because this blocks on network calls and would otherwise trigger a
+        /// priority‑inversion warning if run at user‑initiated QoS.
+        Task(priority: .utility) { [profile] in
+            try await profile.firefoxSuggest?.ingest(emptyOnly: true)
+        }
         logger.log("applicationDidBecomeActive end",
                    level: .info,
                    category: .lifecycle)
@@ -233,6 +259,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, FeatureFlaggable {
         // We have only five seconds here, so let's hope this doesn't take too long.
         logger.log("applicationWillTerminate", level: .info, category: .lifecycle)
         profile.shutdown()
+        documentLogger.logPendingDownloads()
     }
 
     func applicationDidReceiveMemoryWarning(_ application: UIApplication) {
@@ -270,7 +297,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, FeatureFlaggable {
     private func fixSimulatorDevBuild(_ application: UIApplication) {
         // Corrects an issue for development when running Fennec target in
         // the simulator after having run unit tests locally.
-        #if targetEnvironment(simulator) && MOZ_CHANNEL_FENNEC
+        #if targetEnvironment(simulator) && MOZ_CHANNEL_developer
         let key = "_FennecLaunchedUnitTestDelegate"
         guard let flagSet = UserDefaults.standard.value(forKey: key) as? Bool, flagSet else { return }
         // Private API. This code is not present in release builds.

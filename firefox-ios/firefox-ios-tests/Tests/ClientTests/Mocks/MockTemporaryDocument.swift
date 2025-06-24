@@ -7,18 +7,33 @@ import Foundation
 @testable import Client
 
 class MockTemporaryDocument: TemporaryDocument {
+    var sourceURL: URL? {
+        return request?.url
+    }
     var fileURL: URL
     var filename = ""
     var isDownloading = false
     var downloadCalled = 0
     var downloadAsyncCalled = 0
+    var canDownloadCalled = 0
+    var cancelDownloadCalled = 0
+    var pauseDownloadCalled = 0
+    var resumeDownloadCalled = 0
+    var request: URLRequest?
 
-    init(withFileURL fileURL: URL) {
+    init(withFileURL fileURL: URL,
+         request: URLRequest? = nil) {
         self.fileURL = fileURL
+        self.request = request
+    }
+
+    init() {
+        fileURL = URL(fileURLWithPath: "test")
     }
 
     func canDownload(request: URLRequest) -> Bool {
-        return true
+        canDownloadCalled += 1
+        return request.url != self.request?.url
     }
 
     func download(_ completion: @escaping (URL?) -> Void) {
@@ -31,6 +46,15 @@ class MockTemporaryDocument: TemporaryDocument {
         return fileURL
     }
 
-    /// Invalidates the current download session if any and release all the resources.
-    func invalidateSession() {}
+    func cancelDownload() {
+        cancelDownloadCalled += 1
+    }
+
+    func pauseDownload() {
+        pauseDownloadCalled += 1
+    }
+
+    func resumeDownload() {
+        resumeDownloadCalled += 1
+    }
 }

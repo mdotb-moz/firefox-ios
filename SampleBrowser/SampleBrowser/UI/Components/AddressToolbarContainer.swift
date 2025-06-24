@@ -27,17 +27,21 @@ class AddressToolbarContainer: UIView, ThemeApplicable {
                    toolbarDelegate: AddressToolbarDelegate) {
         compactToolbar.configure(
             config: model.state,
+            toolbarPosition: .top,
             toolbarDelegate: toolbarDelegate,
             leadingSpace: 0,
             trailingSpace: 0,
-            isUnifiedSearchEnabled: false
+            isUnifiedSearchEnabled: false,
+            animated: false
         )
         regularToolbar.configure(
             config: model.state,
+            toolbarPosition: .top,
             toolbarDelegate: toolbarDelegate,
             leadingSpace: 0,
             trailingSpace: 0,
-            isUnifiedSearchEnabled: false
+            isUnifiedSearchEnabled: false,
+            animated: false
         )
     }
 

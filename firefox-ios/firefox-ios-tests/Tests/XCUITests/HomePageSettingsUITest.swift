@@ -2,8 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/
 
-import XCTest
 import Common
+import XCTest
 import Shared
 
 let websiteUrl1 = "www.mozilla.org"
@@ -13,7 +13,7 @@ let exampleUrl = "test-example.html"
 let urlExampleLabel = "Example Domain"
 let urlMozillaLabel = "Internet for people, not profit — Mozilla (US)"
 
-class HomePageSettingsUITests: BaseTestCase {
+class HomePageSettingsUITests: FeatureFlaggedTestBase {
     private func enterWebPageAsHomepage(text: String) {
         app.textFields["HomeAsCustomURLTextField"].tapAndTypeText(text)
         let value = app.textFields["HomeAsCustomURLTextField"].value
@@ -36,6 +36,7 @@ class HomePageSettingsUITests: BaseTestCase {
                                LaunchArguments.DisableAnimations]
         }
         super.setUp()
+        app.launch()
     }
 
     // https://mozilla.testrail.io/index.php?/cases/view/2339256
@@ -63,11 +64,7 @@ class HomePageSettingsUITests: BaseTestCase {
         XCTAssertEqual("1", jumpBackIn as? String)
         let bookmarks = app.tables.cells.switches["Bookmarks"].value
         XCTAssertEqual("1", bookmarks as? String)
-        // FXIOS-8107: Commented out as history highlights has been disabled to fix app hangs / slowness
-        // Reloads for notification
-        // let recentlyVisited = app.tables.cells.switches["Recently Visited"].value
-        // XCTAssertEqual("1", recentlyVisited as? String)
-        let sponsoredStories = app.tables.cells.switches["Thought-Provoking Stories, Articles powered by Pocket"].value
+        let sponsoredStories = app.tables.cells.switches["Stories"].value
         XCTAssertEqual("1", sponsoredStories as? String)
 
         // Current Homepage
@@ -93,8 +90,7 @@ class HomePageSettingsUITests: BaseTestCase {
         waitUntilPageLoad()
 
         // Now check open home page should load the previously saved home page
-        let homePageMenuItem = app.buttons[AccessibilityIdentifiers.Toolbar.addNewTabButton]
-        homePageMenuItem.waitAndTap()
+        app.buttons[AccessibilityIdentifiers.Toolbar.addNewTabButton].waitAndTap()
         waitUntilPageLoad()
         mozWaitForElementToExist(app.textFields[AccessibilityIdentifiers.Browser.AddressToolbar.searchTextField])
         mozWaitForValueContains(app.textFields[AccessibilityIdentifiers.Browser.AddressToolbar.searchTextField],
@@ -151,7 +147,7 @@ class HomePageSettingsUITests: BaseTestCase {
         navigator.goto(SettingsScreen)
         navigator.goto(HomePanelsScreen)
         mozWaitForElementToExist(app.links[AccessibilityIdentifiers.FirefoxHomepage.TopSites.itemCell])
-        XCTAssertTrue(app.collectionViews.cells.staticTexts
+        XCTAssertTrue(app.collectionViews.links.staticTexts
             .elementContainingText("Mozilla - Internet for people").exists)
     }
 
@@ -224,8 +220,9 @@ class HomePageSettingsUITests: BaseTestCase {
     }
 
     // https://mozilla.testrail.io/index.php?/cases/view/2307033
-    func testJumpBackIn() {
-        navigator.openURL(path(forTestPage: exampleUrl))
+    func testJumpBackIn_tabTrayExperimentOff() {
+        addLaunchArgument(jsonFileName: "defaultEnabledOff", featureName: "tab-tray-ui-experiments")
+        app.launch()
         waitUntilPageLoad()
         navigator.goto(TabTray)
         navigator.performAction(Action.OpenNewTabFromTabTray)
@@ -243,14 +240,7 @@ class HomePageSettingsUITests: BaseTestCase {
         )
         app.buttons[AccessibilityIdentifiers.FirefoxHomepage.MoreButtons.jumpBackIn].waitAndTap()
         // Tab tray is open with recently open tab
-        if !iPad() {
-            mozWaitForElementToExist(
-                app.otherElements
-                    .cells[AccessibilityIdentifiers.FirefoxHomepage.JumpBackIn.itemCell]
-                    .staticTexts[urlExampleLabel])
-        } else {
-            mozWaitForElementToExist(app.otherElements.cells[urlExampleLabel])
-        }
+        mozWaitForElementToExist(app.otherElements.cells[urlExampleLabel])
         app.buttons["Done"].waitAndTap()
         // Validation for when Jump In section is not displayed
         navigator.nowAt(NewTabScreen)
@@ -262,7 +252,9 @@ class HomePageSettingsUITests: BaseTestCase {
     }
 
     // https://mozilla.testrail.io/index.php?/cases/view/2307034
-    func testRecentlySaved() {
+    func testRecentlySaved_tabTrayExperimentOff() {
+        addLaunchArgument(jsonFileName: "defaultEnabledOff", featureName: "tab-tray-ui-experiments")
+        app.launch()
         // Preconditons: Create 6 bookmarks & add 1 items to reading list
         bookmarkPages()
         addContentToReaderView()
@@ -271,9 +263,9 @@ class HomePageSettingsUITests: BaseTestCase {
             app.buttons[AccessibilityIdentifiers.TabTray.newTabButton].waitAndTap()
         } else {
             navigator.performAction(Action.GoToHomePage)
+            app.buttons[AccessibilityIdentifiers.Browser.UrlBar.cancelButton].waitAndTap()
         }
         mozWaitForElementToExist(app.staticTexts["Bookmarks"])
-        app.buttons[AccessibilityIdentifiers.Browser.UrlBar.cancelButton].waitAndTap()
         navigator.performAction(Action.ToggleRecentlySaved)
         if !iPad() {
             navigator.performAction(Action.ClickSearchButton)
@@ -290,10 +282,6 @@ class HomePageSettingsUITests: BaseTestCase {
         navigator.performAction(Action.ToggleRecentlySaved)
         navigator.nowAt(HomeSettings)
         navigator.performAction(Action.OpenNewTabFromTabTray)
-        if !iPad() {
-            mozWaitForElementToExist(app.buttons[AccessibilityIdentifiers.Browser.UrlBar.cancelButton])
-            navigator.performAction(Action.CloseURLBarOpen)
-        }
         checkBookmarks()
         app.scrollViews
             .cells[AccessibilityIdentifiers.FirefoxHomepage.Bookmarks.itemCell]
@@ -307,62 +295,6 @@ class HomePageSettingsUITests: BaseTestCase {
         navigator.goto(NewTabScreen)
         checkBookmarksUpdated()
     }
-
-    // https://mozilla.testrail.io/index.php?/cases/view/2306923
-    // Smoketest
-    // FXIOS-8107: Disabled test as history highlights has been disabled to fix app hangs / slowness
-    // Reloads for notification
-//    func testRecentlyVisited() {
-//        navigator.openURL(websiteUrl1)
-//        waitUntilPageLoad()
-//        navigator.performAction(Action.GoToHomePage)
-//        mozWaitForElementToExist(
-//            app.scrollViews
-//                .cells[AccessibilityIdentifiers.FirefoxHomepage.HistoryHighlights.itemCell]
-//                .staticTexts[urlMozillaLabel]
-//        )
-//        navigator.goto(HomeSettings)
-//        navigator.performAction(Action.ToggleRecentlyVisited)
-//
-//        // On iPad we have the homepage button always present,
-//        // on iPhone we have the search button instead when we're on a new tab page
-//        if !iPad() {
-//            navigator.performAction(Action.ClickSearchButton)
-//        } else {
-//            navigator.performAction(Action.GoToHomePage)
-//        }
-//
-//        XCTAssertFalse(
-//            app.scrollViews
-//                .cells[AccessibilityIdentifiers.FirefoxHomepage.HistoryHighlights.itemCell]
-//                .staticTexts[urlMozillaLabel].exists
-//        )
-//        if !iPad() {
-//            mozWaitForElementToExist(app.buttons[AccessibilityIdentifiers.Browser.UrlBar.cancelButton], timeout: 3)
-//            navigator.performAction(Action.CloseURLBarOpen)
-//        }
-//        navigator.nowAt(NewTabScreen)
-//        navigator.goto(HomeSettings)
-//        navigator.performAction(Action.ToggleRecentlyVisited)
-//        navigator.nowAt(HomeSettings)
-//        navigator.performAction(Action.OpenNewTabFromTabTray)
-//        XCTAssert(
-//            app.scrollViews
-//                .cells[AccessibilityIdentifiers.FirefoxHomepage.HistoryHighlights.itemCell]
-//                .staticTexts[urlMozillaLabel].exists
-//        )
-
-        // swiftlint:disable line_length
-//        Disabled due to https://github.com/mozilla-mobile/firefox-ios/issues/11271
-//        navigator.openURL("mozilla ")
-//        navigator.openURL(websiteUrl2)
-//        navigator.performAction(Action.GoToHomePage)
-//        XCTAssert(app.scrollViews.cells[AccessibilityIdentifiers.FirefoxHomepage.HistoryHighlights.itemCell].staticTexts["Mozilla , Pages: 2"].exists)
-//        app.scrollViews.cells[AccessibilityIdentifiers.FirefoxHomepage.HistoryHighlights.itemCell].staticTexts["Mozilla , Pages: 2"].staticTexts["Mozilla , Pages: 2"].press(forDuration: 1.5)
-//        selectOptionFromContextMenu(option: "Remove")
-//        XCTAssertFalse(app.scrollViews.cells[AccessibilityIdentifiers.FirefoxHomepage.HistoryHighlights.itemCell].staticTexts["Mozilla , Pages: 2"].exists)
-        // swiftlint:enable line_length
-//    }
 
     // https://mozilla.testrail.io/index.php?/cases/view/2306871
     // Smoketest
@@ -397,20 +329,16 @@ class HomePageSettingsUITests: BaseTestCase {
 //            "1"
 //        )
 
-        // FXIOS-8107: Commented out as history highlights has been disabled to fix app hangs / slowness
-        // Reloads for notification
-//        XCTAssertEqual(
-//            app.cells.switches[AccessibilityIdentifiers.Settings.Homepage.CustomizeFirefox.recentVisited].value as! String,
-//            "1"
-//        )
         XCTAssertEqual(
-            app.cells.switches["Thought-Provoking Stories, Articles powered by Pocket"].value as? String,
+            app.cells.switches["Stories"].value as? String,
             "1"
         )
     }
 
     // https://mozilla.testrail.io/index.php?/cases/view/2307032
-    func testShortcutsRows() {
+    func testShortcutsRows_tabTrayExperimentOff() {
+        addLaunchArgument(jsonFileName: "defaultEnabledOff", featureName: "tab-tray-ui-experiments")
+        app.launch()
         addWebsitesToShortcut(website: path(forTestPage: url_1))
         addWebsitesToShortcut(website: path(forTestPage: url_2["url"]!))
         addWebsitesToShortcut(website: path(forTestPage: url_3))

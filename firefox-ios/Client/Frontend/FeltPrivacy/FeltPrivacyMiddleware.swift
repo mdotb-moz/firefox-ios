@@ -5,7 +5,6 @@
 import Foundation
 import Redux
 import Common
-import Shared
 
 class FeltPrivacyMiddleware {
     var privacyStateManager: ThemeManager
@@ -24,7 +23,7 @@ class FeltPrivacyMiddleware {
             let updateAction = PrivateModeAction(isPrivate: privateState,
                                                  windowUUID: action.windowUUID,
                                                  actionType: PrivateModeActionType.privateModeUpdated)
-            store.dispatch(updateAction)
+            store.dispatchLegacy(updateAction)
         default:
             break
         }

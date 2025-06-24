@@ -3,9 +3,7 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/
 
 import Common
-import ComponentLibrary
 import UIKit
-import Shared
 import Redux
 import UnifiedSearchKit
 
@@ -64,7 +62,7 @@ class SearchEngineSelectionViewController: UIViewController,
         setupView()
         listenForThemeChange(view)
 
-        store.dispatch(
+        store.dispatchLegacy(
             SearchEngineSelectionAction(
                 windowUUID: self.windowUUID,
                 actionType: SearchEngineSelectionActionType.viewDidLoad
@@ -94,7 +92,7 @@ class SearchEngineSelectionViewController: UIViewController,
     // MARK: - Redux
 
     func subscribeToRedux() {
-        store.dispatch(
+        store.dispatchLegacy(
             ScreenAction(
                 windowUUID: windowUUID,
                 actionType: ScreenActionType.showScreen,
@@ -111,7 +109,7 @@ class SearchEngineSelectionViewController: UIViewController,
     }
 
     func unsubscribeFromRedux() {
-        store.dispatch(
+        store.dispatchLegacy(
             ScreenAction(
                 windowUUID: windowUUID,
                 actionType: ScreenActionType.closeScreen,
@@ -173,7 +171,7 @@ class SearchEngineSelectionViewController: UIViewController,
     }
 
     func didTap(searchEngineModel: SearchEngineModel) {
-        store.dispatch(
+        store.dispatchLegacy(
             SearchEngineSelectionAction(
                 windowUUID: self.windowUUID,
                 actionType: SearchEngineSelectionActionType.didTapSearchEngine,

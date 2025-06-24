@@ -6,7 +6,6 @@ import Common
 import ComponentLibrary
 import Foundation
 import UIKit
-import Shared
 
 class ContextualHintViewController: UIViewController,
                                     OnViewDismissable,
@@ -164,7 +163,6 @@ class ContextualHintViewController: UIViewController,
         if delegate == nil { presentationController?.delegate = self }
 
         var viewModel = ContextualHintViewModel(
-            isActionType: viewProvider.isActionType,
             actionButtonTitle: viewProvider.getCopyFor(.action),
             title: viewProvider.getCopyFor(.title),
             description: viewProvider.getCopyFor(.description),

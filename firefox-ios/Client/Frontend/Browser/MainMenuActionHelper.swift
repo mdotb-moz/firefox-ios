@@ -9,10 +9,11 @@ import Storage
 import UIKit
 import SwiftUI
 import Common
+import Glean
 
 protocol ToolBarActionMenuDelegate: AnyObject {
     func updateToolbarState()
-    func addBookmark(url: String, title: String?, site: Site?)
+    func addBookmark(urlString: String, title: String?, site: Site?)
 
     @discardableResult
     func openURLInNewTab(_ url: URL?, isPrivate: Bool) -> Tab
@@ -20,7 +21,7 @@ protocol ToolBarActionMenuDelegate: AnyObject {
 
     func showLibrary(panel: LibraryPanelType)
     func showViewController(viewController: UIViewController)
-    func showToast(_ bookmarkURL: URL?, _ title: String?, message: String, toastAction: MenuButtonToastAction)
+    func showToast(_ bookmarkURL: String?, _ title: String?, message: String, toastAction: MenuButtonToastAction)
     func showFindInPage()
     func showCustomizeHomePage()
     func showZoomPage(tab: Tab)
@@ -28,11 +29,12 @@ protocol ToolBarActionMenuDelegate: AnyObject {
     func showSignInView(fxaParameters: FxASignInViewParameters)
     func showFilePicker(fileURL: URL)
     func showEditBookmark()
+    func showTrackingProtection()
 }
 
 extension ToolBarActionMenuDelegate {
-    func showToast(_ bookmarkURL: URL? = nil, _ title: String? = nil, message: String, toastAction: MenuButtonToastAction) {
-        showToast(bookmarkURL, title, message: message, toastAction: toastAction)
+    func showToast(_ urlString: String? = nil, _ title: String? = nil, message: String, toastAction: MenuButtonToastAction) {
+        showToast(urlString, title, message: message, toastAction: toastAction)
     }
 }
 
@@ -67,6 +69,9 @@ class MainMenuActionHelper: PhotonActionSheetProtocol,
     private let selectedTab: Tab?
     private let tabUrl: URL?
     private let isFileURL: Bool
+    private var isToolbarRefactorEnabled: Bool {
+        return FxNimbus.shared.features.toolbarRefactorFeature.value().enabled
+    }
 
     let themeManager: ThemeManager
     var bookmarksHandler: BookmarksHandler
@@ -229,19 +234,24 @@ class MainMenuActionHelper: PhotonActionSheetProtocol,
         var section = [PhotonRowActions]()
 
         if !isHomePage && !isFileURL {
-            if featureFlags.isFeatureEnabled(.zoomFeature, checking: .buildOnly) {
-                let zoomAction = getZoomAction()
-                append(to: &section, action: zoomAction)
-            }
+            let zoomAction = getZoomAction()
+            append(to: &section, action: zoomAction)
 
             let findInPageAction = getFindInPageAction()
             append(to: &section, action: findInPageAction)
 
             let desktopSiteAction = getRequestDesktopSiteAction()
             append(to: &section, action: desktopSiteAction)
+
+            if isToolbarRefactorEnabled {
+                let trackingProtectionAction = getTrackingProtectionAction()
+                append(to: &section, action: trackingProtectionAction)
+            }
         }
 
-        if featureFlags.isFeatureEnabled(.nightMode, checking: .buildOnly) {
+        /// In the new experiment, where website theming is different from app theming homepage menu should not show
+        /// the website theming option, since it will follow the app theme.
+        if !(themeManager.isNewAppearanceMenuOn && isHomePage) {
             let nightModeAction = getNightModeAction()
             append(to: &section, action: nightModeAction)
         }
@@ -389,13 +399,23 @@ class MainMenuActionHelper: PhotonActionSheetProtocol,
         }.items
     }
 
+    private func getTrackingProtectionAction() -> PhotonRowActions {
+        return SingleActionViewModel(title: .SettingsTrackingProtectionSectionName,
+                                     iconString: StandardImageIdentifiers.Large.shieldCheckmark) { [weak self] _ in
+            let isPrivate = self?.selectedTab?.isPrivate ?? false
+            let extra = GleanMetrics.Toolbar.SiteInfoButtonTappedExtra(isPrivate: isPrivate,
+                                                                       isToolbar: false)
+            GleanMetrics.Toolbar.siteInfoButtonTapped.record(extra)
+            self?.delegate?.showTrackingProtection()
+        }.items
+    }
+
     private func getCopyAction() -> PhotonRowActions? {
         return SingleActionViewModel(title: .LegacyAppMenu.AppMenuCopyLinkTitleString,
                                      iconString: StandardImageIdentifiers.Large.link) { _ in
             TelemetryWrapper.recordEvent(category: .action, method: .tap, object: .copyAddress)
             if let url = self.selectedTab?.canonicalURL?.displayURL {
                 UIPasteboard.general.url = url
-                self.delegate?.showToast(message: .LegacyAppMenu.AppMenuCopyURLConfirmMessage, toastAction: .copyUrl)
             }
         }.items
     }
@@ -440,7 +460,7 @@ class MainMenuActionHelper: PhotonActionSheetProtocol,
     private func getHelpAction() -> PhotonRowActions {
         return SingleActionViewModel(title: .LegacyAppMenu.Help,
                                      iconString: StandardImageIdentifiers.Large.helpCircle) { _ in
-            if let url = URL(string: "https://support.mozilla.org/products/ios") {
+            if let url = SupportUtils.URLForGetHelp {
                 self.delegate?.openURLInNewTab(url, isPrivate: self.tabManager.selectedTab?.isPrivate ?? false)
             }
             TelemetryWrapper.recordEvent(category: .action, method: .tap, object: .help)
@@ -468,19 +488,30 @@ class MainMenuActionHelper: PhotonActionSheetProtocol,
         return openSettings
     }
 
+    private func getNightModeTitle(_ isNightModeOn: Bool) -> String {
+        if themeManager.isNewAppearanceMenuOn {
+            return isNightModeOn
+                ? .MainMenu.Submenus.Tools.WebsiteDarkModeOff
+                : .MainMenu.Submenus.Tools.WebsiteDarkModeOn
+        } else {
+            return isNightModeOn
+                ? .LegacyAppMenu.AppMenuTurnOffNightMode
+                : .LegacyAppMenu.AppMenuTurnOnNightMode
+        }
+    }
+
     private func getNightModeAction() -> [PhotonRowActions] {
         var items: [PhotonRowActions] = []
 
         let nightModeEnabled = NightModeHelper.isActivated()
-        let nightModeTitle: String = if nightModeEnabled {
-            .LegacyAppMenu.AppMenuTurnOffNightMode
-        } else {
-            .LegacyAppMenu.AppMenuTurnOnNightMode
-        }
+
+        let nightModeIcon: String = nightModeEnabled
+            ? StandardImageIdentifiers.Large.nightModeFill
+            : StandardImageIdentifiers.Large.nightMode
 
         let nightMode = SingleActionViewModel(
-            title: nightModeTitle,
-            iconString: StandardImageIdentifiers.Large.nightMode,
+            title: getNightModeTitle(nightModeEnabled),
+            iconString: nightModeIcon,
             isEnabled: nightModeEnabled
         ) { _ in
             NightModeHelper.toggle()
@@ -530,7 +561,7 @@ class MainMenuActionHelper: PhotonActionSheetProtocol,
 
         var iconURL: URL?
         if let str = rustAccount.userProfile?.avatarUrl,
-            let url = URL(string: str, invalidCharacters: false) {
+            let url = URL(string: str) {
             iconURL = url
         }
         let iconType: PhotonActionSheetIconType = needsReAuth ? .Image : .URL
@@ -734,7 +765,7 @@ class MainMenuActionHelper: PhotonActionSheetProtocol,
             else { return }
 
             // The method in BVC also handles the toast for this use case
-            self.delegate?.addBookmark(url: url.absoluteString, title: tab.title, site: nil)
+            self.delegate?.addBookmark(urlString: url.absoluteString, title: tab.title, site: nil)
             let bookmarksTelemetry = BookmarksTelemetry()
             bookmarksTelemetry.addBookmark(eventLabel: .pageActionMenu)
         }
@@ -747,10 +778,6 @@ class MainMenuActionHelper: PhotonActionSheetProtocol,
 
             self.profile.places.deleteBookmarksWithURL(url: url.absoluteString).uponQueue(.main) { result in
                 guard result.isSuccess else { return }
-                self.delegate?.showToast(
-                    message: .LegacyAppMenu.RemoveBookmarkConfirmMessage,
-                    toastAction: .removeBookmark
-                )
                 self.removeBookmarkShortcut()
             }
             let bookmarksTelemetry = BookmarksTelemetry()
@@ -779,11 +806,7 @@ class MainMenuActionHelper: PhotonActionSheetProtocol,
 
             let site = Site.createBasicSite(url: url.absoluteString, title: title)
 
-            self.profile.pinnedSites.addPinnedTopSite(site).uponQueue(.main) { result in
-                guard result.isSuccess else { return }
-                self.delegate?.showToast(message: .LegacyAppMenu.AddPinToShortcutsConfirmMessage, toastAction: .pinPage)
-            }
-
+            self.profile.pinnedSites.addPinnedTopSite(site)
             TelemetryWrapper.recordEvent(category: .action, method: .tap, object: .pinToTopSites)
         }
     }
@@ -796,14 +819,7 @@ class MainMenuActionHelper: PhotonActionSheetProtocol,
 
             let site = Site.createBasicSite(url: url.absoluteString, title: title)
 
-            self.profile.pinnedSites.removeFromPinnedTopSites(site).uponQueue(.main) { result in
-                if result.isSuccess {
-                    self.delegate?.showToast(
-                        message: .LegacyAppMenu.RemovePinFromShortcutsConfirmMessage,
-                        toastAction: .removePinPage
-                    )
-                }
-            }
+            self.profile.pinnedSites.removeFromPinnedTopSites(site)
             TelemetryWrapper.recordEvent(category: .action, method: .tap, object: .removePinnedSite)
         }
     }

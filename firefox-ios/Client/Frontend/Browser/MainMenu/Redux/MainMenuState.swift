@@ -4,14 +4,35 @@
 
 import Common
 import MenuKit
-import Shared
 import Redux
 
 struct AccountData: Equatable {
     let title: String
     let subtitle: String?
     let warningIcon: String?
+    let needsReAuth: Bool?
     let iconURL: URL?
+
+    init(title: String, subtitle: String?, warningIcon: String? = nil, needsReAuth: Bool? = nil, iconURL: URL? = nil) {
+        self.title = title
+        self.subtitle = subtitle
+        self.warningIcon = warningIcon
+        self.needsReAuth = needsReAuth
+        self.iconURL = iconURL
+    }
+}
+
+enum SiteProtectionsState {
+    case on
+    case off
+    case notSecure
+}
+
+struct SiteProtectionsData: Equatable {
+    let title: String?
+    let subtitle: String?
+    let image: String?
+    let state: SiteProtectionsState
 }
 
 struct TelemetryInfo: Equatable {
@@ -46,6 +67,8 @@ struct MainMenuTabInfo: Equatable {
     let isBookmarked: Bool
     let isInReadingList: Bool
     let isPinned: Bool
+    let accountData: AccountData
+    let accountProfileImage: UIImage?
 }
 
 struct MainMenuState: ScreenState, Equatable {
@@ -56,6 +79,8 @@ struct MainMenuState: ScreenState, Equatable {
 
     var accountData: AccountData?
     var accountIcon: UIImage?
+
+    var siteProtectionsData: SiteProtectionsData?
 
     var navigationDestination: MenuNavigationDestination?
     var currentTabInfo: MainMenuTabInfo?
@@ -81,7 +106,8 @@ struct MainMenuState: ScreenState, Equatable {
             navigationDestination: mainMenuState.navigationDestination,
             shouldDismiss: mainMenuState.shouldDismiss,
             accountData: mainMenuState.accountData,
-            accountIcon: mainMenuState.accountIcon
+            accountIcon: mainMenuState.accountIcon,
+            siteProtectionsData: mainMenuState.siteProtectionsData
         )
     }
 
@@ -94,7 +120,8 @@ struct MainMenuState: ScreenState, Equatable {
             navigationDestination: nil,
             shouldDismiss: false,
             accountData: nil,
-            accountIcon: nil
+            accountIcon: nil,
+            siteProtectionsData: nil
         )
     }
 
@@ -106,7 +133,8 @@ struct MainMenuState: ScreenState, Equatable {
         navigationDestination: MenuNavigationDestination? = nil,
         shouldDismiss: Bool = false,
         accountData: AccountData?,
-        accountIcon: UIImage?
+        accountIcon: UIImage?,
+        siteProtectionsData: SiteProtectionsData?
     ) {
         self.windowUUID = windowUUID
         self.menuElements = menuElements
@@ -116,6 +144,7 @@ struct MainMenuState: ScreenState, Equatable {
         self.shouldDismiss = shouldDismiss
         self.accountData = accountData
         self.accountIcon = accountIcon
+        self.siteProtectionsData = siteProtectionsData
     }
 
     static let reducer: Reducer<Self> = { state, action in
@@ -129,8 +158,12 @@ struct MainMenuState: ScreenState, Equatable {
             return handleViewDidLoadAction(state: state)
         case MainMenuMiddlewareActionType.updateAccountHeader:
             return handleUpdateAccountHeaderAction(state: state, action: action)
+        case MainMenuActionType.updateSiteProtectionsHeader:
+            return handleUpdateSiteProtectionsHeaderAction(state: state, action: action)
         case MainMenuActionType.updateCurrentTabInfo:
             return handleUpdateCurrentTabInfoAction(state: state, action: action)
+        case MainMenuActionType.tapMoreOptions:
+            return handleShowMoreOptions(state: state, action: action)
         case MainMenuActionType.tapShowDetailsView:
             return handleTapShowDetailsViewAction(state: state, action: action)
         case MainMenuActionType.tapNavigateToDestination:
@@ -138,6 +171,16 @@ struct MainMenuState: ScreenState, Equatable {
         case MainMenuActionType.tapToggleUserAgent,
             MainMenuActionType.tapCloseMenu:
             return handleTapToggleUserAgentAndTapCloseMenuAction(state: state)
+        case MainMenuActionType.tapAddToBookmarks:
+            return handleDismissMenuAction(state: state)
+        case MainMenuActionType.tapEditBookmark:
+            return handleTapEditBookmarkAction(state: state, action: action)
+        case MainMenuActionType.tapZoom:
+            return handleTapZoomAction(state: state)
+        case MainMenuActionType.tapToggleNightMode:
+            return handleDismissMenuAction(state: state)
+        case MainMenuActionType.tapAddToShortcuts, MainMenuActionType.tapRemoveFromShortcuts:
+            return handleDismissMenuAction(state: state)
         default:
             return defaultState(from: state)
         }
@@ -149,7 +192,8 @@ struct MainMenuState: ScreenState, Equatable {
             menuElements: state.menuElements,
             currentTabInfo: state.currentTabInfo,
             accountData: state.accountData,
-            accountIcon: state.accountIcon
+            accountIcon: state.accountIcon,
+            siteProtectionsData: state.siteProtectionsData
         )
     }
 
@@ -159,7 +203,8 @@ struct MainMenuState: ScreenState, Equatable {
             menuElements: state.menuElements,
             currentTabInfo: state.currentTabInfo,
             accountData: state.accountData,
-            accountIcon: state.accountIcon
+            accountIcon: state.accountIcon,
+            siteProtectionsData: state.siteProtectionsData
         )
     }
 
@@ -171,7 +216,21 @@ struct MainMenuState: ScreenState, Equatable {
             menuElements: state.menuElements,
             currentTabInfo: state.currentTabInfo,
             accountData: action.accountData,
-            accountIcon: action.accountIcon
+            accountIcon: action.accountIcon,
+            siteProtectionsData: state.siteProtectionsData
+        )
+    }
+
+    private static func handleUpdateSiteProtectionsHeaderAction(state: MainMenuState, action: Action) -> MainMenuState {
+        guard let action = action as? MainMenuAction else { return defaultState(from: state) }
+
+        return MainMenuState(
+            windowUUID: state.windowUUID,
+            menuElements: state.menuElements,
+            currentTabInfo: state.currentTabInfo,
+            accountData: state.accountData,
+            accountIcon: state.accountIcon,
+            siteProtectionsData: action.siteProtectionsData
         )
     }
 
@@ -189,7 +248,29 @@ struct MainMenuState: ScreenState, Equatable {
             ),
             currentTabInfo: currentTabInfo,
             accountData: state.accountData,
-            accountIcon: state.accountIcon
+            accountIcon: state.accountIcon,
+            siteProtectionsData: state.siteProtectionsData
+        )
+    }
+
+    private static func handleShowMoreOptions(state: MainMenuState, action: Action) -> MainMenuState {
+        guard let action = action as? MainMenuAction,
+              let currentTabInfo = state.currentTabInfo,
+              let isExpanded = action.isExpanded
+        else { return defaultState(from: state) }
+
+        return MainMenuState(
+            windowUUID: state.windowUUID,
+            menuElements: state.menuConfigurator.generateMenuElements(
+                with: currentTabInfo,
+                for: state.currentSubmenuView,
+                and: state.windowUUID,
+                isExpanded: !isExpanded
+            ),
+            currentTabInfo: state.currentTabInfo,
+            accountData: state.accountData,
+            accountIcon: state.accountIcon,
+            siteProtectionsData: state.siteProtectionsData
         )
     }
 
@@ -202,7 +283,8 @@ struct MainMenuState: ScreenState, Equatable {
             currentTabInfo: state.currentTabInfo,
             submenuDestination: action.detailsViewToShow,
             accountData: state.accountData,
-            accountIcon: state.accountIcon
+            accountIcon: state.accountIcon,
+            siteProtectionsData: state.siteProtectionsData
         )
     }
 
@@ -215,7 +297,8 @@ struct MainMenuState: ScreenState, Equatable {
             currentTabInfo: state.currentTabInfo,
             navigationDestination: action.navigationDestination,
             accountData: state.accountData,
-            accountIcon: state.accountIcon
+            accountIcon: state.accountIcon,
+            siteProtectionsData: state.siteProtectionsData
         )
     }
 
@@ -226,7 +309,44 @@ struct MainMenuState: ScreenState, Equatable {
             currentTabInfo: state.currentTabInfo,
             shouldDismiss: true,
             accountData: state.accountData,
-            accountIcon: state.accountIcon
+            accountIcon: state.accountIcon,
+            siteProtectionsData: state.siteProtectionsData
+        )
+    }
+
+    private static func handleDismissMenuAction(state: MainMenuState) -> MainMenuState {
+        return MainMenuState(
+            windowUUID: state.windowUUID,
+            menuElements: state.menuElements,
+            currentTabInfo: state.currentTabInfo,
+            shouldDismiss: true,
+            accountData: state.accountData,
+            accountIcon: state.accountIcon,
+            siteProtectionsData: state.siteProtectionsData
+        )
+    }
+
+    private static func handleTapEditBookmarkAction(state: MainMenuState, action: Action) -> MainMenuState {
+        return MainMenuState(
+            windowUUID: state.windowUUID,
+            menuElements: state.menuElements,
+            currentTabInfo: state.currentTabInfo,
+            navigationDestination: MenuNavigationDestination(.editBookmark),
+            accountData: state.accountData,
+            accountIcon: state.accountIcon,
+            siteProtectionsData: state.siteProtectionsData
+        )
+    }
+
+    private static func handleTapZoomAction(state: MainMenuState) -> MainMenuState {
+        return MainMenuState(
+            windowUUID: state.windowUUID,
+            menuElements: state.menuElements,
+            currentTabInfo: state.currentTabInfo,
+            navigationDestination: MenuNavigationDestination(.zoom),
+            accountData: state.accountData,
+            accountIcon: state.accountIcon,
+            siteProtectionsData: state.siteProtectionsData
         )
     }
 }

@@ -8,6 +8,8 @@ import ToolbarKit
 
 final class ToolbarAction: Action {
     let toolbarPosition: SearchBarPosition?
+    let toolbarLayout: ToolbarLayoutStyle?
+    let isTranslucent: Bool?
     let numberOfTabs: Int?
     let url: URL?
     let searchTerm: String?
@@ -26,8 +28,11 @@ final class ToolbarAction: Action {
     let isLoading: Bool?
     let isNewTabFeatureEnabled: Bool?
     let canShowDataClearanceAction: Bool?
+    let shouldAnimate: Bool?
 
     init(toolbarPosition: SearchBarPosition? = nil,
+         toolbarLayout: ToolbarLayoutStyle? = nil,
+         isTranslucent: Bool? = nil,
          numberOfTabs: Int? = nil,
          url: URL? = nil,
          searchTerm: String? = nil,
@@ -46,9 +51,12 @@ final class ToolbarAction: Action {
          isLoading: Bool? = nil,
          isNewTabFeatureEnabled: Bool? = nil,
          canShowDataClearanceAction: Bool? = nil,
+         shouldAnimate: Bool? = nil,
          windowUUID: WindowUUID,
          actionType: ActionType) {
         self.toolbarPosition = toolbarPosition
+        self.toolbarLayout = toolbarLayout
+        self.isTranslucent = isTranslucent
         self.numberOfTabs = numberOfTabs
         self.url = url
         self.searchTerm = searchTerm
@@ -67,6 +75,7 @@ final class ToolbarAction: Action {
         self.isLoading = isLoading
         self.isNewTabFeatureEnabled = isNewTabFeatureEnabled
         self.canShowDataClearanceAction = canShowDataClearanceAction
+        self.shouldAnimate = shouldAnimate
         super.init(windowUUID: windowUUID, actionType: actionType)
     }
 }
@@ -84,6 +93,7 @@ enum ToolbarActionType: ActionType {
     case cancelEditOnHomepage
     case cancelEdit
     case hideKeyboard
+    case animationStateChanged
     case readerModeStateChanged
     case backForwardButtonStateChanged
     case traitCollectionDidChange
@@ -96,6 +106,7 @@ enum ToolbarActionType: ActionType {
     case didEnterSearchTerm
     case didSetSearchTerm
     case didStartTyping
+    case translucencyDidChange
 }
 
 class ToolbarMiddlewareAction: Action {

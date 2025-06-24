@@ -19,6 +19,9 @@ public protocol EngineSessionDelegate: AnyObject {
     /// Event to indicate the loading progress has been updated.
     func onProgress(progress: Double)
 
+    /// Event to indicate we should hide the progress bar since we don't want to animate it for example on localhost
+    func onHideProgressBar()
+
     /// Event to indicate there has been a navigation change.
     func onNavigationStateChange(canGoBack: Bool, canGoForward: Bool)
 
@@ -55,4 +58,14 @@ public protocol EngineSessionDelegate: AnyObject {
     /// This is utilized in conjunction with the related ads telemetry events (e.g. `.trackAdsFoundOnPage`
     /// which are also passed along to telemetry proxy (`EngineTelemetryProxy`).
     func adsSearchProviderModels() -> [EngineSearchProviderModel]
+
+    /// Allows delegate to provide custom permissions for requesting media capture (e.g. camera/microphone permissions)
+    /// Returns a bool indicating whether media capture is allowed
+    func requestMediaCapturePermission() -> Bool
+
+    /// An Event that indicates that a new session was created and needs to be handled.
+    ///
+    /// A new session can be requested when a navigation requests
+    /// to show its content into a new window thus a new session is generated for it.
+    func onRequestOpenNewSession(_ session: EngineSession)
 }

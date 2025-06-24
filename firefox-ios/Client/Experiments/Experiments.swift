@@ -53,8 +53,9 @@ private let NIMBUS_IS_FIRST_RUN_KEY = "NimbusFirstRun"
 ///
 /// Rust errors are not expected, but will be reported via logger.
 enum Experiments {
-    private static var studiesSetting: Bool?
-    private static var telemetrySetting: Bool?
+    // TODO: FXIOS-12587 This global property is not concurrency safe
+    nonisolated(unsafe) private static var studiesSetting: Bool?
+    nonisolated(unsafe) private static var telemetrySetting: Bool?
 
     static func setStudiesSetting(_ setting: Bool) {
         studiesSetting = setting
@@ -136,7 +137,8 @@ enum Experiments {
     }
 
     /// The `NimbusApi` object. This is the entry point to do anything with the Nimbus SDK on device.
-    static var shared: NimbusInterface = {
+    /// TODO FXIOS-12602 This global property is not concurrency safe
+    nonisolated(unsafe) static var shared: NimbusInterface = {
         let defaults = UserDefaults.standard
         let isFirstRun: Bool = defaults.object(forKey: NIMBUS_IS_FIRST_RUN_KEY) == nil
         if isFirstRun {
@@ -171,9 +173,7 @@ enum Experiments {
         let customTargetingAttributes: [String: Any] = [
             "isFirstRun": "\(isFirstRun)",
             "is_first_run": isFirstRun,
-            "is_phone": isPhone,
-            "is_review_checker_enabled": isReviewCheckerEnabled(),
-            "is_default_browser": isDefaultBrowser(),
+            "is_phone": isPhone
         ]
 
         // App settings, to allow experiments to target the app name and the
@@ -186,16 +186,18 @@ enum Experiments {
         )
     }
 
-    private static func isReviewCheckerEnabled() -> Bool {
-        var isReviewCheckerEnabled = false
-        if let prefs = UserDefaults(suiteName: AppInfo.sharedContainerIdentifier) {
-            isReviewCheckerEnabled = prefs.bool(forKey: "profile." + PrefsKeys.Shopping2023OptIn)
-        }
-        return isReviewCheckerEnabled
-    }
-
     private static func isDefaultBrowser() -> Bool {
         return UserDefaults.standard.bool(forKey: PrefsKeys.AppleConfirmedUserIsDefaultBrowser)
+    }
+
+    private static func isBottomToolbarUser() -> Bool {
+        let prefsReader = ProfilePrefsReader()
+        return prefsReader.isBottomToolbarUser()
+    }
+
+    private static func hasEnabledTipsNotifications() -> Bool {
+        let prefsReader = ProfilePrefsReader()
+        return prefsReader.hasEnabledTipsNotifications()
     }
 
     private static func buildNimbus(dbPath: String,
@@ -210,8 +212,9 @@ enum Experiments {
 
         let nimbusRecordedContext = RecordedNimbusContext(
             isFirstRun: isFirstRun,
-            isReviewCheckerEnabled: isReviewCheckerEnabled(),
-            isDefaultBrowser: isDefaultBrowser()
+            isDefaultBrowser: isDefaultBrowser(),
+            isBottomToolbarUser: isBottomToolbarUser(),
+            hasEnabledTipsNotifications: hasEnabledTipsNotifications()
         )
 
         return NimbusBuilder(dbPath: dbPath)
@@ -258,11 +261,11 @@ extension Experiments {
         return try? sdk.createMessageHelper(additionalContext: context)
     }
 
-    public static var messaging: GleanPlumbMessageManagerProtocol = GleanPlumbMessageManager()
+    public static let messaging: GleanPlumbMessageManagerProtocol = GleanPlumbMessageManager()
 
-    public static var events: NimbusEventStore = sdk.events
+    public static let events: NimbusEventStore = sdk.events
 
-    public static var sdk: NimbusInterface = shared
+    public static let sdk: NimbusInterface = shared
 }
 
 private extension AppBuildChannel {

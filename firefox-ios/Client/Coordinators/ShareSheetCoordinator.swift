@@ -102,7 +102,9 @@ class ShareSheetCoordinator: BaseCoordinator,
                 showSendToDevice(url: shareType.wrappedURL, relatedTab: nil)
             }
         case .copyToPasteboard:
-            showToast(text: .LegacyAppMenu.AppMenuCopyURLConfirmMessage)
+            if case .file = shareType {
+                showToast(text: .ShareFileCopiedToClipboard)
+            }
             dequeueNotShownJSAlert()
         default:
             dequeueNotShownJSAlert()

@@ -4,7 +4,6 @@
 
 import Common
 import Foundation
-import MenuKit
 import Redux
 
 final class MainMenuAction: Action {
@@ -14,7 +13,9 @@ final class MainMenuAction: Action {
     var detailsViewToShow: MainMenuDetailsViewType?
     var accountData: AccountData?
     var accountIcon: UIImage?
+    var siteProtectionsData: SiteProtectionsData?
     var telemetryInfo: TelemetryInfo?
+    var isExpanded: Bool?
 
     init(
         windowUUID: WindowUUID,
@@ -25,7 +26,9 @@ final class MainMenuAction: Action {
         tabID: TabUUID? = nil,
         accountData: AccountData? = nil,
         accountIcon: UIImage? = nil,
-        telemetryInfo: TelemetryInfo? = nil
+        siteProtectionsData: SiteProtectionsData? = nil,
+        telemetryInfo: TelemetryInfo? = nil,
+        isExpanded: Bool? = nil
     ) {
         self.navigationDestination = navigationDestination
         self.detailsViewToShow = changeMenuViewTo
@@ -33,7 +36,9 @@ final class MainMenuAction: Action {
         self.tabID = tabID
         self.accountData = accountData
         self.accountIcon = accountIcon
+        self.siteProtectionsData = siteProtectionsData
         self.telemetryInfo = telemetryInfo
+        self.isExpanded = isExpanded
         super.init(windowUUID: windowUUID, actionType: actionType)
     }
 }
@@ -44,13 +49,22 @@ enum MainMenuActionType: ActionType {
     case tapShowDetailsView
     case tapToggleUserAgent
     case updateCurrentTabInfo
+    case tapMoreOptions
     case didInstantiateView
     case viewDidLoad
     case menuDismissed
+    case tapAddToBookmarks
+    case tapEditBookmark
+    case tapZoom
+    case tapToggleNightMode
+    case tapAddToShortcuts
+    case tapRemoveFromShortcuts
+    case updateSiteProtectionsHeader
 }
 
 enum MainMenuMiddlewareActionType: ActionType {
     case requestTabInfo
+    case requestTabInfoForSiteProtectionsHeader
     case updateAccountHeader
 }
 

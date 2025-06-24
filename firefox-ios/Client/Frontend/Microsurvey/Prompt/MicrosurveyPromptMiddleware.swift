@@ -4,7 +4,6 @@
 
 import Foundation
 import Redux
-import Shared
 import Common
 
 final class MicrosurveyPromptMiddleware {
@@ -43,7 +42,7 @@ final class MicrosurveyPromptMiddleware {
             windowUUID: windowUUID,
             actionType: MicrosurveyPromptMiddlewareActionType.initialize
         )
-        store.dispatch(newAction)
+        store.dispatchLegacy(newAction)
         microsurveyManager.handleMessageDisplayed()
     }
 

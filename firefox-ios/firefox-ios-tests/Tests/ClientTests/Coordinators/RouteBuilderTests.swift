@@ -19,7 +19,7 @@ class RouteBuilderTests: XCTestCase {
         randomActivity.webpageURL = testURL
     }
     func test_makeRoute_HandlesAnyActivityType() {
-        let routeBuilder = createSubject()
+        let routeBuilder = createSubject(mainQueue: MockDispatchQueue())
 
         let route = routeBuilder.makeRoute(
             userActivity: handoffUserActivity
@@ -38,8 +38,18 @@ class RouteBuilderTests: XCTestCase {
         XCTAssertEqual(randomRoute, .search(url: testURL, isPrivate: false))
     }
 
-    private func createSubject() -> RouteBuilder {
-        let subject = RouteBuilder()
+    func test_makeRoute_ResetsShouldOpenNewTabAfterDelay() {
+        let routeBuilder = createSubject(mainQueue: MockDispatchQueue())
+        routeBuilder.shouldOpenNewTab = true
+        let userActivity = NSUserActivity(activityType: SiriShortcuts.activityType.openURL.rawValue)
+
+        _ = routeBuilder.makeRoute(userActivity: userActivity)
+
+        XCTAssertTrue(routeBuilder.shouldOpenNewTab)
+     }
+
+    private func createSubject(mainQueue: MockDispatchQueue) -> RouteBuilder {
+        let subject = RouteBuilder(mainQueue: mainQueue)
         trackForMemoryLeaks(subject)
         return subject
     }

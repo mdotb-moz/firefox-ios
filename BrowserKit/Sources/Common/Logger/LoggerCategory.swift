@@ -11,6 +11,9 @@ public enum LoggerCategory: String {
     /// Related to content (trackers, advertisements) blocking
     case adblock
 
+    /// Related to setting an alternative app icon and resetting to the default app icon.
+    case appIcon
+
     /// Related to address, credit card and password autofill
     case autofill
 
@@ -42,8 +45,14 @@ public enum LoggerCategory: String {
     /// Related to the main menu.
     case mainMenu
 
+    /// Related to onboarding
+    case onboarding
+
     /// Related to redux library or integration
     case redux
+
+    /// Related to the settings
+    case settings
 
     /// Related to the setup of services on app launch.
     case setup

@@ -106,21 +106,56 @@ final class TopsSitesSectionStateTests: XCTestCase {
         XCTAssertTrue(newState.shouldShowSection)
     }
 
-    func test_toggleShowSectionSetting_withToggleOff_returnsExpectedState() throws {
+    // MARK: numberOfTilesPerRow
+    func test_viewWillTransition_numberOfTilesPerRow_returnsExpectedState() {
         let initialState = createSubject()
         let reducer = topSiteReducer()
 
         let newState = reducer(
             initialState,
-            TopSitesAction(
-                isEnabled: false,
+            HomepageAction(
+                numberOfTopSitesPerRow: 8,
                 windowUUID: .XCTestDefaultUUID,
-                actionType: TopSitesActionType.toggleShowSectionSetting
+                actionType: HomepageActionType.viewWillTransition
             )
         )
 
         XCTAssertEqual(newState.windowUUID, .XCTestDefaultUUID)
-        XCTAssertFalse(newState.shouldShowSection)
+        XCTAssertEqual(newState.numberOfTilesPerRow, 8)
+    }
+
+    func test_viewDidLayoutSubviews_numberOfTilesPerRow_returnsExpectedState() {
+        let initialState = createSubject()
+        let reducer = topSiteReducer()
+
+        let newState = reducer(
+            initialState,
+            HomepageAction(
+                numberOfTopSitesPerRow: 8,
+                windowUUID: .XCTestDefaultUUID,
+                actionType: HomepageActionType.viewDidLayoutSubviews
+            )
+        )
+
+        XCTAssertEqual(newState.windowUUID, .XCTestDefaultUUID)
+        XCTAssertEqual(newState.numberOfTilesPerRow, 8)
+    }
+
+    func test_initialize_numberOfTilesPerRow_returnsExpectedState() {
+        let initialState = createSubject()
+        let reducer = topSiteReducer()
+
+        let newState = reducer(
+            initialState,
+            HomepageAction(
+                numberOfTopSitesPerRow: 8,
+                windowUUID: .XCTestDefaultUUID,
+                actionType: HomepageActionType.initialize
+            )
+        )
+
+        XCTAssertEqual(newState.windowUUID, .XCTestDefaultUUID)
+        XCTAssertEqual(newState.numberOfTilesPerRow, 8)
     }
 
     // MARK: - Private

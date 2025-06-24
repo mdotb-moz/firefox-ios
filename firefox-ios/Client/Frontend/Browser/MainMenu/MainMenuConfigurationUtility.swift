@@ -17,6 +17,7 @@ struct MainMenuConfigurationUtility: Equatable, FeatureFlaggable {
         static let tools = StandardImageIdentifiers.Large.tool
         static let save = StandardImageIdentifiers.Large.save
         static let bookmarks = StandardImageIdentifiers.Large.bookmarkTrayFill
+        static let bookmarksTray = StandardImageIdentifiers.Large.bookmarkTray
         static let history = StandardImageIdentifiers.Large.history
         static let downloads = StandardImageIdentifiers.Large.download
         static let passwords = StandardImageIdentifiers.Large.login
@@ -33,6 +34,7 @@ struct MainMenuConfigurationUtility: Equatable, FeatureFlaggable {
         static let share = StandardImageIdentifiers.Large.share
         static let addToShortcuts = StandardImageIdentifiers.Large.pin
         static let removeFromShortcuts = StandardImageIdentifiers.Large.pinSlashFill
+        static let removeFromShortcutsV2 = StandardImageIdentifiers.Large.pinFill
         static let saveToReadingList = StandardImageIdentifiers.Large.readingListAdd
         static let removeFromReadingList = StandardImageIdentifiers.Large.readingListSlashFill
         static let bookmarkThisPage = StandardImageIdentifiers.Large.bookmark
@@ -40,6 +42,10 @@ struct MainMenuConfigurationUtility: Equatable, FeatureFlaggable {
         static let reportBrokenSite = StandardImageIdentifiers.Large.lightbulb
         static let customizeHomepage = StandardImageIdentifiers.Large.gridAdd
         static let saveAsPDF = StandardImageIdentifiers.Large.folder
+        static let saveAsPDFV2 = StandardImageIdentifiers.Large.saveFile
+        static let avatarCircle = StandardImageIdentifiers.Large.avatarCircle
+        static let avatarWarningLargeLight = StandardImageIdentifiers.Large.avatarWarningCircleFillMulticolorLight
+        static let avatarWarningLargeDark = StandardImageIdentifiers.Large.avatarWarningCircleFillMulticolorDark
 
         // These will be used in the future, but not now.
         // adding them just for completion's sake
@@ -50,11 +56,24 @@ struct MainMenuConfigurationUtility: Equatable, FeatureFlaggable {
         featureFlags.isFeatureEnabled(.reportSiteIssue, checking: .buildOnly)
     }
 
+    private var isNewAppearanceMenuOn: Bool {
+        featureFlags.isFeatureEnabled(.appearanceMenu, checking: .buildOnly)
+    }
+
+    private var isMenuRedesignOn: Bool {
+        featureFlags.isFeatureEnabled(.menuRedesign, checking: .buildOnly)
+    }
+
+    private var isDefaultZoomEnabled: Bool {
+        featureFlags.isFeatureEnabled(.defaultZoomFeature, checking: .buildOnly)
+    }
+
     public func generateMenuElements(
         with tabInfo: MainMenuTabInfo,
         for viewType: MainMenuDetailsViewType?,
         and uuid: WindowUUID,
-        readerState: ReaderModeState? = nil
+        readerState: ReaderModeState? = nil,
+        isExpanded: Bool = false
     ) -> [MenuSection] {
         switch viewType {
         case .tools:
@@ -64,7 +83,7 @@ struct MainMenuConfigurationUtility: Equatable, FeatureFlaggable {
             return getSaveSubmenu(with: uuid, and: tabInfo)
 
         default:
-            return getMainMenuElements(with: uuid, and: tabInfo)
+            return getMainMenuElements(with: uuid, and: tabInfo, isExpanded: isExpanded)
         }
     }
 
@@ -72,28 +91,482 @@ struct MainMenuConfigurationUtility: Equatable, FeatureFlaggable {
 
     private func getMainMenuElements(
         with uuid: WindowUUID,
-        and tabInfo: MainMenuTabInfo
+        and tabInfo: MainMenuTabInfo,
+        isExpanded: Bool = false
     ) -> [MenuSection] {
         // Always include these sections
-        var menuSections: [MenuSection] = [
-            getNewTabSection(with: uuid, tabInfo: tabInfo),
-            getLibrariesSection(with: uuid, tabInfo: tabInfo),
-            getOtherToolsSection(
-                with: uuid,
-                isHomepage: tabInfo.isHomepage,
-                tabInfo: tabInfo
-            )
-        ]
+        var menuSections: [MenuSection] = []
 
-        // Conditionally add tools section if this is a website
-        if !tabInfo.isHomepage {
-            menuSections.insert(
-                getToolsSection(with: uuid, and: tabInfo),
-                at: 1
-            )
+        if !isMenuRedesignOn {
+            menuSections.append(getNewTabSection(with: uuid, tabInfo: tabInfo))
+            menuSections.append(getLibrariesSection(with: uuid, tabInfo: tabInfo))
+            menuSections.append(
+                getOtherToolsSection(
+                    with: uuid,
+                    isHomepage: tabInfo.isHomepage,
+                    tabInfo: tabInfo
+                ))
+            // Conditionally add tools section if this is a website
+            if !tabInfo.isHomepage {
+                menuSections.insert(
+                    getToolsSection(with: uuid, and: tabInfo),
+                    at: 1
+                )
+            }
+        } else if tabInfo.isHomepage {
+            menuSections.append(getCustomiseHomepageSection(with: uuid, tabInfo: tabInfo))
+            menuSections.append(getHorizontalTabsSection(with: uuid, tabInfo: tabInfo))
+            menuSections.append(getAccountSection(with: uuid, tabInfo: tabInfo))
+        } else {
+            menuSections.append(getSiteSection(with: uuid, tabInfo: tabInfo, isExpanded: isExpanded))
+            menuSections.append(getHorizontalTabsSection(with: uuid, tabInfo: tabInfo))
+            menuSections.append(getAccountSection(with: uuid, tabInfo: tabInfo))
         }
 
         return menuSections
+    }
+
+    // MARK: - Menu Redesign Sections
+    // Customise Homepage Section
+    private func getCustomiseHomepageSection(with uuid: WindowUUID, tabInfo: MainMenuTabInfo) -> MenuSection {
+        return MenuSection(
+            isHomepage: tabInfo.isHomepage,
+            options: [
+                MenuElement(
+                    title: .MainMenu.OtherToolsSection.CustomizeHomepage,
+                    iconName: Icons.tools,
+                    isEnabled: true,
+                    isActive: false,
+                    a11yLabel: .MainMenu.OtherToolsSection.AccessibilityLabels.CustomizeHomepage,
+                    a11yHint: "",
+                    a11yId: AccessibilityIdentifiers.MainMenu.customizeHomepage,
+                    action: {
+                        store.dispatchLegacy(
+                            MainMenuAction(
+                                windowUUID: uuid,
+                                actionType: MainMenuActionType.tapNavigateToDestination,
+                                navigationDestination: MenuNavigationDestination(.customizeHomepage),
+                                telemetryInfo: TelemetryInfo(isHomepage: tabInfo.isHomepage)
+                            )
+                        )
+                    }
+                ),
+        ])
+    }
+
+    // Horizontal Tabs Section
+    private func getHorizontalTabsSection(with uuid: WindowUUID, tabInfo: MainMenuTabInfo) -> MenuSection {
+        return MenuSection(
+            isHorizontalTabsSection: true,
+            isHomepage: tabInfo.isHomepage,
+            options: [
+            MenuElement(
+                title: .MainMenu.PanelLinkSection.History,
+                iconName: Icons.history,
+                isEnabled: true,
+                isActive: false,
+                a11yLabel: .MainMenu.PanelLinkSection.AccessibilityLabels.History,
+                a11yHint: "",
+                a11yId: AccessibilityIdentifiers.MainMenu.history,
+                action: {
+                    store.dispatchLegacy(
+                        MainMenuAction(
+                            windowUUID: uuid,
+                            actionType: MainMenuActionType.tapNavigateToDestination,
+                            navigationDestination: MenuNavigationDestination(.history),
+                            telemetryInfo: TelemetryInfo(isHomepage: tabInfo.isHomepage)
+                        )
+                    )
+                }
+            ),
+            MenuElement(
+                title: .MainMenu.PanelLinkSection.Bookmarks,
+                iconName: Icons.bookmarksTray,
+                isEnabled: true,
+                isActive: false,
+                a11yLabel: .MainMenu.PanelLinkSection.AccessibilityLabels.Bookmarks,
+                a11yHint: "",
+                a11yId: AccessibilityIdentifiers.MainMenu.bookmarks,
+                action: {
+                    store.dispatchLegacy(
+                        MainMenuAction(
+                            windowUUID: uuid,
+                            actionType: MainMenuActionType.tapNavigateToDestination,
+                            navigationDestination: MenuNavigationDestination(.bookmarks),
+                            telemetryInfo: TelemetryInfo(isHomepage: tabInfo.isHomepage)
+                        )
+                    )
+                }
+            ),
+            MenuElement(
+                title: .MainMenu.PanelLinkSection.Downloads,
+                iconName: Icons.downloads,
+                isEnabled: true,
+                isActive: false,
+                a11yLabel: .MainMenu.PanelLinkSection.AccessibilityLabels.Downloads,
+                a11yHint: "",
+                a11yId: AccessibilityIdentifiers.MainMenu.downloads,
+                action: {
+                    store.dispatchLegacy(
+                        MainMenuAction(
+                            windowUUID: uuid,
+                            actionType: MainMenuActionType.tapNavigateToDestination,
+                            navigationDestination: MenuNavigationDestination(.downloads),
+                            telemetryInfo: TelemetryInfo(isHomepage: tabInfo.isHomepage)
+                        )
+                    )
+                }
+            ),
+            MenuElement(
+                title: .MainMenu.PanelLinkSection.Passwords,
+                iconName: Icons.passwords,
+                isEnabled: true,
+                isActive: false,
+                a11yLabel: .MainMenu.PanelLinkSection.AccessibilityLabels.Passwords,
+                a11yHint: "",
+                a11yId: AccessibilityIdentifiers.MainMenu.passwords,
+                action: {
+                    store.dispatchLegacy(
+                        MainMenuAction(
+                            windowUUID: uuid,
+                            actionType: MainMenuActionType.tapNavigateToDestination,
+                            navigationDestination: MenuNavigationDestination(.passwords),
+                            telemetryInfo: TelemetryInfo(isHomepage: tabInfo.isHomepage)
+                        )
+                    )
+                }
+            ),
+        ])
+    }
+
+    // Account Section
+    private func getAccountSection(with uuid: WindowUUID, tabInfo: MainMenuTabInfo) -> MenuSection {
+        return MenuSection(
+            isHomepage: tabInfo.isHomepage,
+            options: [
+                MenuElement(
+                    title: tabInfo.accountData.title,
+                    description: tabInfo.accountData.subtitle,
+                    iconName: Icons.avatarCircle,
+                    iconImage: tabInfo.accountProfileImage,
+                    needsReAuth: tabInfo.accountData.needsReAuth,
+                    isEnabled: true,
+                    isActive: false,
+                    a11yLabel: "",
+                    a11yHint: "",
+                    a11yId: AccessibilityIdentifiers.MainMenu.signIn,
+                    action: {
+                        store.dispatchLegacy(
+                            MainMenuAction(
+                                windowUUID: uuid,
+                                actionType: MainMenuActionType.tapNavigateToDestination,
+                                navigationDestination: MenuNavigationDestination(.syncSignIn),
+                                currentTabInfo: tabInfo
+                            )
+                        )
+                    }
+                ),
+                MenuElement(
+                    title: .MainMenu.OtherToolsSection.Settings,
+                    iconName: Icons.settings,
+                    isEnabled: true,
+                    isActive: false,
+                    a11yLabel: .MainMenu.OtherToolsSection.AccessibilityLabels.Settings,
+                    a11yHint: "",
+                    a11yId: AccessibilityIdentifiers.MainMenu.settings,
+                    action: {
+                        store.dispatchLegacy(
+                            MainMenuAction(
+                                windowUUID: uuid,
+                                actionType: MainMenuActionType.tapNavigateToDestination,
+                                navigationDestination: MenuNavigationDestination(.settings),
+                                telemetryInfo: TelemetryInfo(isHomepage: tabInfo.isHomepage)
+                            )
+                        )
+                    }
+                ),
+        ])
+    }
+
+    // Site Section
+    private func getSiteSection(with uuid: WindowUUID, tabInfo: MainMenuTabInfo, isExpanded: Bool) -> MenuSection {
+        var options: [MenuElement] = [
+            configureBookmarkPageItem(with: uuid, and: tabInfo),
+            MenuElement(
+                title: .MainMenu.ToolsSection.FindInPageV2,
+                iconName: Icons.findInPage,
+                isEnabled: true,
+                isActive: false,
+                a11yLabel: .MainMenu.ToolsSection.AccessibilityLabels.FindInPage,
+                a11yHint: "",
+                a11yId: AccessibilityIdentifiers.MainMenu.findInPage,
+                action: {
+                    store.dispatchLegacy(
+                        MainMenuAction(
+                            windowUUID: uuid,
+                            actionType: MainMenuActionType.tapNavigateToDestination,
+                            navigationDestination: MenuNavigationDestination(.findInPage),
+                            telemetryInfo: TelemetryInfo(isHomepage: tabInfo.isHomepage)
+                        )
+                    )
+                }
+            ),
+            configureUserAgentItemV2(with: uuid, tabInfo: tabInfo)
+        ]
+
+        if !isExpanded {
+            options.append(configureMoreLessItem(with: uuid, tabInfo: tabInfo, isExpanded: isExpanded))
+        } else {
+            options.append(contentsOf: [
+                configureZoomItemV2(with: uuid, and: tabInfo),
+                configureWebsiteDarkModeItem(with: uuid, and: tabInfo),
+                configureShortcutsItemV2(with: uuid, and: tabInfo),
+                MenuElement(
+                    title: .MainMenu.Submenus.Save.SaveAsPDF,
+                    iconName: Icons.saveAsPDFV2,
+                    isEnabled: true,
+                    isActive: false,
+                    a11yLabel: .MainMenu.Submenus.Save.AccessibilityLabels.SaveAsPDF,
+                    a11yHint: "",
+                    a11yId: AccessibilityIdentifiers.MainMenu.saveAsPDF,
+                    isOptional: true,
+                    action: {
+                        store.dispatchLegacy(
+                            MainMenuAction(
+                                windowUUID: uuid,
+                                actionType: MainMenuActionType.tapNavigateToDestination,
+                                navigationDestination: MenuNavigationDestination(
+                                    .saveAsPDF,
+                                    url: tabInfo.canonicalURL
+                                ),
+                                telemetryInfo: TelemetryInfo(isHomepage: tabInfo.isHomepage)
+                            )
+                        )
+                    }
+                ),
+                MenuElement(
+                    title: .MainMenu.Submenus.Tools.Print,
+                    iconName: Icons.print,
+                    isEnabled: true,
+                    isActive: false,
+                    a11yLabel: .MainMenu.Submenus.Tools.AccessibilityLabels.Print,
+                    a11yHint: "",
+                    a11yId: AccessibilityIdentifiers.MainMenu.print,
+                    isOptional: true,
+                    action: {
+                        store.dispatchLegacy(
+                            MainMenuAction(
+                                windowUUID: uuid,
+                                actionType: MainMenuActionType.tapNavigateToDestination,
+                                navigationDestination: MenuNavigationDestination(
+                                    .printSheet,
+                                    url: tabInfo.canonicalURL
+                                ),
+                                telemetryInfo: TelemetryInfo(isHomepage: tabInfo.isHomepage)
+                            )
+                        )
+                    }
+                ),
+            ])
+        }
+        return MenuSection(isExpanded: isExpanded, options: options)
+    }
+
+    private func configureBookmarkPageItem(
+        with uuid: WindowUUID,
+        and tabInfo: MainMenuTabInfo
+    ) -> MenuElement {
+        typealias SaveMenu = String.MainMenu.Submenus.Save
+        typealias A11y = SaveMenu.AccessibilityLabels
+
+        let title = tabInfo.isBookmarked ? SaveMenu.EditBookmark : SaveMenu.BookmarkPage
+        let icon = tabInfo.isBookmarked ? Icons.editThisBookmark : Icons.bookmarkThisPage
+        let a11yLabel = tabInfo.isBookmarked ? A11y.EditBookmark : A11y.BookmarkPage
+        let actionType: MainMenuActionType = tabInfo.isBookmarked ? .tapEditBookmark : .tapAddToBookmarks
+
+        return MenuElement(
+            title: title,
+            iconName: icon,
+            isEnabled: true,
+            isActive: tabInfo.isBookmarked,
+            a11yLabel: a11yLabel,
+            a11yHint: "",
+            a11yId: AccessibilityIdentifiers.MainMenu.bookmarkPage,
+            action: {
+                store.dispatchLegacy(
+                    MainMenuAction(
+                        windowUUID: uuid,
+                        actionType: actionType,
+                        tabID: tabInfo.tabID,
+                        telemetryInfo: TelemetryInfo(isHomepage: tabInfo.isHomepage)
+                    )
+                )
+            }
+        )
+    }
+
+    private func configureUserAgentItemV2(
+        with uuid: WindowUUID,
+        tabInfo: MainMenuTabInfo
+    ) -> MenuElement {
+        let isActive = tabInfo.isDefaultUserAgentDesktop ? !tabInfo.hasChangedUserAgent : tabInfo.hasChangedUserAgent
+        return MenuElement(
+            title: .MainMenu.ToolsSection.DesktopSite,
+            iconName: "",
+            isEnabled: true,
+            isActive: isActive,
+            a11yLabel: .MainMenu.ToolsSection.AccessibilityLabels.DesktopSite,
+            a11yHint: "",
+            a11yId: AccessibilityIdentifiers.MainMenu.desktopSite,
+            infoTitle: isActive ? .MainMenu.On : .MainMenu.Off,
+            action: {
+                store.dispatchLegacy(
+                    MainMenuAction(
+                        windowUUID: uuid,
+                        actionType: MainMenuActionType.tapToggleUserAgent,
+                        telemetryInfo: TelemetryInfo(isHomepage: tabInfo.isHomepage,
+                                                     isDefaultUserAgentDesktop: tabInfo.isDefaultUserAgentDesktop,
+                                                     hasChangedUserAgent: tabInfo.hasChangedUserAgent)
+                    )
+                )
+            }
+        )
+    }
+
+    private func configureMoreLessItem(
+        with uuid: WindowUUID,
+        tabInfo: MainMenuTabInfo,
+        isExpanded: Bool
+    ) -> MenuElement {
+        typealias Menu = String.MainMenu.ToolsSection
+        typealias A11y = String.MainMenu.ToolsSection.AccessibilityLabels
+        typealias Icons = StandardImageIdentifiers.Large
+
+        return MenuElement(
+            title: isExpanded ? Menu.LessOptions : Menu.MoreOptions,
+            iconName: isExpanded ? Icons.chevronDown : Icons.chevronRight,
+            isEnabled: true,
+            isActive: false,
+            a11yLabel: isExpanded ? A11y.LessOptions : A11y.MoreOptions,
+            a11yHint: "",
+            a11yId: AccessibilityIdentifiers.MainMenu.moreLess,
+            action: {
+                store.dispatchLegacy(
+                    MainMenuAction(
+                        windowUUID: uuid,
+                        actionType: MainMenuActionType.tapMoreOptions,
+                        isExpanded: isExpanded
+                    )
+                )
+            }
+        )
+    }
+
+    private func configureZoomItemV2(
+        with uuid: WindowUUID,
+        and tabInfo: MainMenuTabInfo
+    ) -> MenuElement {
+        let zoomLevel = NumberFormatter.localizedString(
+            from: NSNumber(value: tabInfo.zoomLevel),
+            number: .percent
+        )
+
+        let regularZoom: CGFloat = 1.0
+        let zoomSymbol: String = if tabInfo.zoomLevel > regularZoom {
+            .MainMenu.Submenus.Tools.ZoomPositiveSymbol
+        } else if tabInfo.zoomLevel < regularZoom {
+            .MainMenu.Submenus.Tools.ZoomNegativeSymbol
+        } else {
+            ""
+        }
+
+        return MenuElement(
+            title: .MainMenu.Submenus.Tools.PageZoomV2,
+            iconName: "",
+            isEnabled: true,
+            isActive: tabInfo.zoomLevel != regularZoom,
+            a11yLabel: String(format: .MainMenu.Submenus.Tools.AccessibilityLabels.Zoom, "\(zoomSymbol)\(zoomLevel)"),
+            a11yHint: "",
+            a11yId: AccessibilityIdentifiers.MainMenu.zoom,
+            isOptional: true,
+            infoTitle: "\(zoomLevel)",
+            action: {
+                store.dispatchLegacy(
+                    MainMenuAction(
+                        windowUUID: uuid,
+                        actionType: MainMenuActionType.tapZoom,
+                        telemetryInfo: TelemetryInfo(isHomepage: tabInfo.isHomepage)
+                    )
+                )
+            }
+        )
+    }
+
+    private func configureWebsiteDarkModeItem(
+        with uuid: WindowUUID,
+        and tabInfo: MainMenuTabInfo
+    ) -> MenuElement {
+        typealias A11y = String.MainMenu.Submenus.Tools.AccessibilityLabels
+
+        let nightModeIsOn = NightModeHelper.isActivated()
+        let a11yLabel = nightModeIsOn ? A11y.NightModeOff : A11y.NightModeOn
+
+        return MenuElement(
+            title: .MainMenu.Submenus.Tools.WebsiteDarkMode,
+            iconName: "",
+            isEnabled: true,
+            isActive: nightModeIsOn,
+            a11yLabel: a11yLabel,
+            a11yHint: "",
+            a11yId: AccessibilityIdentifiers.MainMenu.nightMode,
+            isOptional: true,
+            infoTitle: nightModeIsOn ? .MainMenu.On : .MainMenu.Off,
+            action: {
+                store.dispatchLegacy(
+                    MainMenuAction(
+                        windowUUID: uuid,
+                        actionType: MainMenuActionType.tapToggleNightMode,
+                        telemetryInfo: TelemetryInfo(isHomepage: tabInfo.isHomepage,
+                                                     isActionOn: nightModeIsOn)
+                    )
+                )
+            }
+        )
+    }
+
+    private func configureShortcutsItemV2(
+        with uuid: WindowUUID,
+        and tabInfo: MainMenuTabInfo
+    ) -> MenuElement {
+        typealias SaveMenu = String.MainMenu.Submenus.Save
+        typealias A11y = SaveMenu.AccessibilityLabels
+
+        let title = tabInfo.isPinned ? SaveMenu.RemoveFromShortcuts : SaveMenu.AddToShortcuts
+        let icon = tabInfo.isPinned ? Icons.removeFromShortcutsV2 : Icons.addToShortcuts
+        let a11yLabel = tabInfo.isPinned ? A11y.RemoveFromShortcuts : A11y.AddToShortcuts
+
+        let actionType: MainMenuActionType = tabInfo.isPinned ? .tapRemoveFromShortcuts : .tapAddToShortcuts
+
+        return MenuElement(
+            title: title,
+            iconName: icon,
+            isEnabled: true,
+            isActive: tabInfo.isPinned,
+            a11yLabel: a11yLabel,
+            a11yHint: "",
+            a11yId: AccessibilityIdentifiers.MainMenu.addToShortcuts,
+            isOptional: true,
+            action: {
+                store.dispatchLegacy(
+                    MainMenuAction(
+                        windowUUID: uuid,
+                        actionType: actionType,
+                        tabID: tabInfo.tabID,
+                        telemetryInfo: TelemetryInfo(isHomepage: tabInfo.isHomepage)
+                    )
+                )
+            }
+        )
     }
 
     // MARK: - New Tabs Section
@@ -108,7 +581,7 @@ struct MainMenuConfigurationUtility: Equatable, FeatureFlaggable {
                 a11yHint: "",
                 a11yId: AccessibilityIdentifiers.MainMenu.newTab,
                 action: {
-                    store.dispatch(
+                    store.dispatchLegacy(
                         MainMenuAction(
                             windowUUID: uuid,
                             actionType: MainMenuActionType.tapNavigateToDestination,
@@ -127,7 +600,7 @@ struct MainMenuConfigurationUtility: Equatable, FeatureFlaggable {
                 a11yHint: "",
                 a11yId: AccessibilityIdentifiers.MainMenu.newPrivateTab,
                 action: {
-                    store.dispatch(
+                    store.dispatchLegacy(
                         MainMenuAction(
                             windowUUID: uuid,
                             actionType: MainMenuActionType.tapNavigateToDestination,
@@ -158,7 +631,7 @@ struct MainMenuConfigurationUtility: Equatable, FeatureFlaggable {
                     a11yHint: "",
                     a11yId: AccessibilityIdentifiers.MainMenu.findInPage,
                     action: {
-                        store.dispatch(
+                        store.dispatchLegacy(
                             MainMenuAction(
                                 windowUUID: uuid,
                                 actionType: MainMenuActionType.tapNavigateToDestination,
@@ -179,7 +652,7 @@ struct MainMenuConfigurationUtility: Equatable, FeatureFlaggable {
                     a11yHint: getToolsSubmenuDescription(with: configuration),
                     a11yId: AccessibilityIdentifiers.MainMenu.tools,
                     action: {
-                        store.dispatch(
+                        store.dispatchLegacy(
                             MainMenuAction(
                                 windowUUID: uuid,
                                 actionType: MainMenuActionType.tapShowDetailsView,
@@ -200,7 +673,7 @@ struct MainMenuConfigurationUtility: Equatable, FeatureFlaggable {
                     a11yHint: getSaveSubmenuDescription(with: configuration),
                     a11yId: AccessibilityIdentifiers.MainMenu.save,
                     action: {
-                        store.dispatch(
+                        store.dispatchLegacy(
                             MainMenuAction(
                                 windowUUID: uuid,
                                 actionType: MainMenuActionType.tapShowDetailsView,
@@ -279,7 +752,7 @@ struct MainMenuConfigurationUtility: Equatable, FeatureFlaggable {
             a11yHint: "",
             a11yId: AccessibilityIdentifiers.MainMenu.switchToDesktopSite,
             action: {
-                store.dispatch(
+                store.dispatchLegacy(
                     MainMenuAction(
                         windowUUID: uuid,
                         actionType: MainMenuActionType.tapToggleUserAgent,
@@ -333,7 +806,7 @@ struct MainMenuConfigurationUtility: Equatable, FeatureFlaggable {
             a11yHint: "",
             a11yId: AccessibilityIdentifiers.MainMenu.reportBrokenSite,
             action: {
-                store.dispatch(
+                store.dispatchLegacy(
                     MainMenuAction(
                         windowUUID: uuid,
                         actionType: MainMenuActionType.tapNavigateToDestination,
@@ -361,7 +834,7 @@ struct MainMenuConfigurationUtility: Equatable, FeatureFlaggable {
             a11yHint: "",
             a11yId: AccessibilityIdentifiers.MainMenu.print,
             action: {
-                store.dispatch(
+                store.dispatchLegacy(
                     MainMenuAction(
                         windowUUID: uuid,
                         actionType: MainMenuActionType.tapNavigateToDestination,
@@ -389,7 +862,7 @@ struct MainMenuConfigurationUtility: Equatable, FeatureFlaggable {
             a11yHint: "",
             a11yId: AccessibilityIdentifiers.MainMenu.share,
             action: {
-                store.dispatch(
+                store.dispatchLegacy(
                     MainMenuAction(
                         windowUUID: uuid,
                         actionType: MainMenuActionType.tapNavigateToDestination,
@@ -412,19 +885,32 @@ struct MainMenuConfigurationUtility: Equatable, FeatureFlaggable {
             from: NSNumber(value: tabInfo.zoomLevel),
             number: .percent
         )
-        let title = String(format: .MainMenu.Submenus.Tools.Zoom, zoomLevel)
-        let icon = tabInfo.zoomLevel == 1.0 ? Icons.zoomOff : Icons.zoomOn
+
+        let regularZoom: CGFloat = 1.0
+        let zoomSymbol: String = if tabInfo.zoomLevel > regularZoom {
+            .MainMenu.Submenus.Tools.ZoomPositiveSymbol
+        } else if tabInfo.zoomLevel < regularZoom {
+            .MainMenu.Submenus.Tools.ZoomNegativeSymbol
+        } else {
+            ""
+        }
+
+        let formattableString: String = isDefaultZoomEnabled ?
+            .MainMenu.Submenus.Tools.PageZoom :
+            .MainMenu.Submenus.Tools.Zoom
+        let title = String(format: formattableString, "\(zoomSymbol)\(zoomLevel)")
+        let icon = tabInfo.zoomLevel == regularZoom ? Icons.zoomOff : Icons.zoomOn
 
         return MenuElement(
             title: title,
             iconName: icon,
             isEnabled: true,
-            isActive: tabInfo.zoomLevel != 1.0,
-            a11yLabel: String(format: .MainMenu.Submenus.Tools.AccessibilityLabels.Zoom, zoomLevel),
+            isActive: tabInfo.zoomLevel != regularZoom,
+            a11yLabel: String(format: .MainMenu.Submenus.Tools.AccessibilityLabels.Zoom, "\(zoomSymbol)\(zoomLevel)"),
             a11yHint: "",
             a11yId: AccessibilityIdentifiers.MainMenu.zoom,
             action: {
-                store.dispatch(
+                store.dispatchLegacy(
                     MainMenuAction(
                         windowUUID: uuid,
                         actionType: MainMenuDetailsActionType.tapZoom,
@@ -458,7 +944,7 @@ struct MainMenuConfigurationUtility: Equatable, FeatureFlaggable {
             a11yHint: readerModeState != .unavailable ? "" : .MainMenu.AccessibilityLabels.OptionDisabledHint,
             a11yId: AccessibilityIdentifiers.MainMenu.readerView,
             action: {
-                store.dispatch(
+                store.dispatchLegacy(
                     MainMenuAction(
                         windowUUID: uuid,
                         actionType: GeneralBrowserActionType.showReaderMode,
@@ -466,7 +952,7 @@ struct MainMenuConfigurationUtility: Equatable, FeatureFlaggable {
                                                      isActionOn: readerModeState == .active)
                     )
                 )
-                store.dispatch(
+                store.dispatchLegacy(
                     GeneralBrowserAction(
                         windowUUID: uuid,
                         actionType: GeneralBrowserActionType.showReaderMode
@@ -476,17 +962,27 @@ struct MainMenuConfigurationUtility: Equatable, FeatureFlaggable {
         )
     }
 
+    private func getNightModeTitle(_ isNightModeOn: Bool) -> String {
+        if isNewAppearanceMenuOn {
+            return isNightModeOn
+                ? .MainMenu.Submenus.Tools.WebsiteDarkModeOff
+                : .MainMenu.Submenus.Tools.WebsiteDarkModeOn
+        } else {
+            return isNightModeOn
+                ? .MainMenu.Submenus.Tools.NightModeOff
+                : .MainMenu.Submenus.Tools.NightModeOn
+        }
+    }
+
     private func configureNightModeItem(with uuid: WindowUUID, and tabInfo: MainMenuTabInfo) -> MenuElement {
-        typealias Strings = String.MainMenu.Submenus.Tools
         typealias A11y = String.MainMenu.Submenus.Tools.AccessibilityLabels
 
         let nightModeIsOn = NightModeHelper.isActivated()
-        let title = nightModeIsOn ? Strings.NightModeOff : Strings.NightModeOn
         let icon = nightModeIsOn ? Icons.nightModeOn : Icons.nightModeOff
         let a11yLabel = nightModeIsOn ? A11y.NightModeOff : A11y.NightModeOn
 
         return MenuElement(
-            title: title,
+            title: getNightModeTitle(nightModeIsOn),
             iconName: icon,
             isEnabled: true,
             isActive: nightModeIsOn,
@@ -494,7 +990,7 @@ struct MainMenuConfigurationUtility: Equatable, FeatureFlaggable {
             a11yHint: "",
             a11yId: AccessibilityIdentifiers.MainMenu.nightMode,
             action: {
-                store.dispatch(
+                store.dispatchLegacy(
                     MainMenuAction(
                         windowUUID: uuid,
                         actionType: MainMenuDetailsActionType.tapToggleNightMode,
@@ -543,7 +1039,7 @@ struct MainMenuConfigurationUtility: Equatable, FeatureFlaggable {
             a11yHint: "",
             a11yId: AccessibilityIdentifiers.MainMenu.bookmarkThisPage,
             action: {
-                store.dispatch(
+                store.dispatchLegacy(
                     MainMenuAction(
                         windowUUID: uuid,
                         actionType: actionType,
@@ -576,7 +1072,7 @@ struct MainMenuConfigurationUtility: Equatable, FeatureFlaggable {
             a11yHint: "",
             a11yId: AccessibilityIdentifiers.MainMenu.addToShortcuts,
             action: {
-                store.dispatch(
+                store.dispatchLegacy(
                     MainMenuAction(
                         windowUUID: uuid,
                         actionType: actionType,
@@ -610,7 +1106,7 @@ struct MainMenuConfigurationUtility: Equatable, FeatureFlaggable {
             a11yHint: tabInfo.readerModeIsAvailable ? "" : .MainMenu.AccessibilityLabels.OptionDisabledHint,
             a11yId: AccessibilityIdentifiers.MainMenu.saveToReadingList,
             action: {
-                store.dispatch(
+                store.dispatchLegacy(
                     MainMenuAction(
                         windowUUID: uuid,
                         actionType: actionType,
@@ -635,7 +1131,7 @@ struct MainMenuConfigurationUtility: Equatable, FeatureFlaggable {
             a11yHint: "",
             a11yId: AccessibilityIdentifiers.MainMenu.saveAsPDF,
             action: {
-                store.dispatch(
+                store.dispatchLegacy(
                     MainMenuAction(
                         windowUUID: uuid,
                         actionType: MainMenuActionType.tapNavigateToDestination,
@@ -662,7 +1158,7 @@ struct MainMenuConfigurationUtility: Equatable, FeatureFlaggable {
                 a11yHint: "",
                 a11yId: AccessibilityIdentifiers.MainMenu.bookmarks,
                 action: {
-                    store.dispatch(
+                    store.dispatchLegacy(
                         MainMenuAction(
                             windowUUID: uuid,
                             actionType: MainMenuActionType.tapNavigateToDestination,
@@ -681,7 +1177,7 @@ struct MainMenuConfigurationUtility: Equatable, FeatureFlaggable {
                 a11yHint: "",
                 a11yId: AccessibilityIdentifiers.MainMenu.history,
                 action: {
-                    store.dispatch(
+                    store.dispatchLegacy(
                         MainMenuAction(
                             windowUUID: uuid,
                             actionType: MainMenuActionType.tapNavigateToDestination,
@@ -700,7 +1196,7 @@ struct MainMenuConfigurationUtility: Equatable, FeatureFlaggable {
                 a11yHint: "",
                 a11yId: AccessibilityIdentifiers.MainMenu.downloads,
                 action: {
-                    store.dispatch(
+                    store.dispatchLegacy(
                         MainMenuAction(
                             windowUUID: uuid,
                             actionType: MainMenuActionType.tapNavigateToDestination,
@@ -719,7 +1215,7 @@ struct MainMenuConfigurationUtility: Equatable, FeatureFlaggable {
                 a11yHint: "",
                 a11yId: AccessibilityIdentifiers.MainMenu.passwords,
                 action: {
-                    store.dispatch(
+                    store.dispatchLegacy(
                         MainMenuAction(
                             windowUUID: uuid,
                             actionType: MainMenuActionType.tapNavigateToDestination,
@@ -749,7 +1245,7 @@ struct MainMenuConfigurationUtility: Equatable, FeatureFlaggable {
                 a11yHint: "",
                 a11yId: AccessibilityIdentifiers.MainMenu.customizeHomepage,
                 action: {
-                    store.dispatch(
+                    store.dispatchLegacy(
                         MainMenuAction(
                             windowUUID: uuid,
                             actionType: MainMenuActionType.tapNavigateToDestination,
@@ -774,7 +1270,7 @@ struct MainMenuConfigurationUtility: Equatable, FeatureFlaggable {
                 a11yHint: "",
                 a11yId: AccessibilityIdentifiers.MainMenu.whatsNew,
                 action: {
-                    store.dispatch(
+                    store.dispatchLegacy(
                         MainMenuAction(
                             windowUUID: uuid,
                             actionType: MainMenuActionType.tapNavigateToDestination,
@@ -799,7 +1295,7 @@ struct MainMenuConfigurationUtility: Equatable, FeatureFlaggable {
                 a11yHint: "",
                 a11yId: AccessibilityIdentifiers.MainMenu.getHelp,
                 action: {
-                    store.dispatch(
+                    store.dispatchLegacy(
                         MainMenuAction(
                             windowUUID: uuid,
                             actionType: MainMenuActionType.tapNavigateToDestination,
@@ -821,7 +1317,7 @@ struct MainMenuConfigurationUtility: Equatable, FeatureFlaggable {
                 a11yHint: "",
                 a11yId: AccessibilityIdentifiers.MainMenu.settings,
                 action: {
-                    store.dispatch(
+                    store.dispatchLegacy(
                         MainMenuAction(
                             windowUUID: uuid,
                             actionType: MainMenuActionType.tapNavigateToDestination,

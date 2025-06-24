@@ -45,7 +45,7 @@ extension BrowserViewController {
               let url = tab.canonicalURL?.displayURL else { return }
 
         if !contentContainer.hasAnyHomepage {
-            addBookmark(url: url.absoluteString, title: tab.title)
+            addBookmark(urlString: url.absoluteString, title: tab.title)
         }
     }
 
@@ -57,8 +57,8 @@ extension BrowserViewController {
                                      extras: ["action": "reload"])
         guard let tab = tabManager.selectedTab else { return }
         if isToolbarRefactorEnabled {
-            store.dispatch(GeneralBrowserAction(windowUUID: windowUUID,
-                                                actionType: GeneralBrowserActionType.reloadWebsite))
+            store.dispatchLegacy(GeneralBrowserAction(windowUUID: windowUUID,
+                                                      actionType: GeneralBrowserActionType.reloadWebsite))
         } else {
             if !contentContainer.hasAnyHomepage {
                 tab.reload()
@@ -74,8 +74,8 @@ extension BrowserViewController {
                                      extras: ["action": "reload-no-cache"])
         guard let tab = tabManager.selectedTab else { return }
         if isToolbarRefactorEnabled {
-            store.dispatch(GeneralBrowserAction(windowUUID: windowUUID,
-                                                actionType: GeneralBrowserActionType.reloadWebsiteNoCache))
+            store.dispatchLegacy(GeneralBrowserAction(windowUUID: windowUUID,
+                                                      actionType: GeneralBrowserActionType.reloadWebsiteNoCache))
         } else {
             if !contentContainer.hasAnyHomepage {
                 tab.reload(bypassCache: true)
@@ -91,8 +91,8 @@ extension BrowserViewController {
                                      extras: ["action": "go-back"])
         guard let tab = tabManager.selectedTab, tab.canGoBack else { return }
         if isToolbarRefactorEnabled {
-            store.dispatch(GeneralBrowserAction(windowUUID: windowUUID,
-                                                actionType: GeneralBrowserActionType.navigateBack))
+            store.dispatchLegacy(GeneralBrowserAction(windowUUID: windowUUID,
+                                                      actionType: GeneralBrowserActionType.navigateBack))
         } else {
             if !contentContainer.hasAnyHomepage {
                 tab.goBack()
@@ -108,8 +108,8 @@ extension BrowserViewController {
                                      extras: ["action": "go-forward"])
         guard let tab = tabManager.selectedTab, tab.canGoForward else { return }
         if isToolbarRefactorEnabled {
-            store.dispatch(GeneralBrowserAction(windowUUID: windowUUID,
-                                                actionType: GeneralBrowserActionType.navigateForward))
+            store.dispatchLegacy(GeneralBrowserAction(windowUUID: windowUUID,
+                                                      actionType: GeneralBrowserActionType.navigateForward))
         } else {
             if !contentContainer.hasAnyHomepage {
                 tab.goForward()
@@ -148,7 +148,7 @@ extension BrowserViewController {
         scrollController.showToolbars(animated: true)
 
         if isToolbarRefactorEnabled {
-            store.dispatch(ToolbarAction(windowUUID: windowUUID, actionType: ToolbarActionType.didStartEditingUrl))
+            store.dispatchLegacy(ToolbarAction(windowUUID: windowUUID, actionType: ToolbarActionType.didStartEditingUrl))
         } else if let legacyUrlBar {
             legacyUrlBar.tabLocationViewDidTapLocation(legacyUrlBar.locationView)
         }
@@ -162,8 +162,8 @@ extension BrowserViewController {
                                      extras: ["action": "new-tab"])
 
         if isToolbarRefactorEnabled {
-            store.dispatch(GeneralBrowserAction(windowUUID: windowUUID,
-                                                actionType: GeneralBrowserActionType.addNewTab))
+            store.dispatchLegacy(GeneralBrowserAction(windowUUID: windowUUID,
+                                                      actionType: GeneralBrowserActionType.addNewTab))
         } else {
             let isPrivate = tabManager.selectedTab?.isPrivate ?? false
             openBlankNewTab(focusLocationField: true, isPrivate: isPrivate)
@@ -195,13 +195,16 @@ extension BrowserViewController {
 
     @objc
     func closeTabKeyCommand() {
-        TelemetryWrapper.recordEvent(category: .action,
-                                     method: .press,
-                                     object: .keyCommand,
-                                     extras: ["action": "close-tab"])
-        guard let currentTab = tabManager.selectedTab else { return }
-        tabManager.removeTab(currentTab)
-        keyboardPressesHandler().reset()
+        Task {
+            TelemetryWrapper.recordEvent(category: .action,
+                                         method: .press,
+                                         object: .keyCommand,
+                                         extras: ["action": "close-tab"])
+            guard let currentTab = tabManager.selectedTab else { return }
+            tabsPanelTelemetry.tabClosed(mode: currentTab.isPrivate ? .private : .normal)
+            await tabManager.removeTab(currentTab.tabUUID)
+            keyboardPressesHandler().reset()
+        }
     }
 
     @objc
@@ -339,29 +342,25 @@ extension BrowserViewController {
 
     @objc
     func zoomIn() {
-        guard let currentTab = tabManager.selectedTab else { return }
+        guard contentContainer.hasAnyHomepage else { return }
 
-        if !contentContainer.hasAnyHomepage {
-            currentTab.zoomIn()
-        }
+        let zoomValue = zoomManager.zoomIn()
+        zoomPageBar?.updateZoomLabel(zoomValue: zoomValue)
     }
 
     @objc
     func zoomOut() {
-        guard let currentTab = tabManager.selectedTab else { return }
+        guard contentContainer.hasAnyHomepage else { return }
 
-        if !contentContainer.hasAnyHomepage {
-            currentTab.zoomOut()
-        }
+        let zoomValue = zoomManager.zoomOut()
+        zoomPageBar?.updateZoomLabel(zoomValue: zoomValue)
     }
 
     @objc
     func resetZoom() {
-        guard let currentTab = tabManager.selectedTab else { return }
+        guard contentContainer.hasAnyHomepage else { return }
 
-        if !contentContainer.hasAnyHomepage {
-            currentTab.resetZoom()
-        }
+        zoomManager.resetZoom()
     }
 
     // MARK: - KeyCommands

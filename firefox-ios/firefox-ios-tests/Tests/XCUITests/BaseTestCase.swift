@@ -80,6 +80,9 @@ class BaseTestCase: XCTestCase {
         userState = navigator.userState
     }
 
+    /// To be overriden to setup experiment variables for `FeatureFlaggedTestSuite`
+    func setUpExperimentVariables() {}
+
     func setUpApp() {
         setUpLaunchArguments()
         if ProcessInfo.processInfo.environment["EXPERIMENT_NAME"] != nil {
@@ -316,7 +319,7 @@ class BaseTestCase: XCTestCase {
     }
 
      func selectOptionFromContextMenu(option: String) {
-        app.tables["Context Menu"].cells.otherElements[option].waitAndTap()
+       app.tables["Context Menu"].cells.buttons[option].waitAndTap()
         mozWaitForElementToNotExist(app.tables["Context Menu"])
     }
 
@@ -410,20 +413,25 @@ class BaseTestCase: XCTestCase {
         XCTAssertEqual(result, .completed, "Element did not become hittable in time.")
     }
 
+    // Theme settings has been replaced with Appearance screen
     func switchThemeToDarkOrLight(theme: String) {
-        mozWaitForElementToExist(app.buttons[AccessibilityIdentifiers.Toolbar.settingsMenuButton])
+        if !app.buttons[AccessibilityIdentifiers.Toolbar.settingsMenuButton].isHittable {
+            app.buttons["Done"].waitAndTap()
+        }
         navigator.nowAt(BrowserTab)
+        // Dismiss new changes pop up if exists
+        app.buttons["Close"].tapIfExists()
         navigator.goto(SettingsScreen)
         navigator.goto(DisplaySettings)
-        mozWaitForElementToExist(app.switches["SystemThemeSwitchValue"])
-        if (app.switches["SystemThemeSwitchValue"].value as? String) == "1" {
-            navigator.performAction(Action.SystemThemeSwitch)
+        sleep(3)
+        if !app.navigationBars["Appearance"].exists {
+            navigator.goto(DisplaySettings)
         }
-        mozWaitForElementToExist(app.cells.staticTexts["Dark"])
+        mozWaitForElementToExist(app.navigationBars["Appearance"])
         if theme == "Dark" {
-            app.cells.staticTexts["Dark"].waitAndTap()
+            navigator.performAction(Action.SelectDarkTheme)
         } else {
-            app.cells.staticTexts["Light"].waitAndTap()
+            navigator.performAction(Action.SelectLightTheme)
         }
         app.buttons["Settings"].waitAndTap()
         navigator.nowAt(SettingsScreen)
@@ -432,14 +440,9 @@ class BaseTestCase: XCTestCase {
 
     func openNewTabAndValidateURLisPaste(url: String) {
         app.buttons[AccessibilityIdentifiers.Toolbar.addNewTabButton].waitAndTap()
-        if #available(iOS 17, *) {
-            app.textFields[AccessibilityIdentifiers.Browser.AddressToolbar.searchTextField].press(forDuration: 1.5)
-        } else {
-            app.buttons[AccessibilityIdentifiers.Browser.UrlBar.cancelButton].waitAndTap()
-            app.textFields[AccessibilityIdentifiers.Browser.AddressToolbar.searchTextField].press(forDuration: 2)
-        }
+        app.textFields[AccessibilityIdentifiers.Browser.AddressToolbar.searchTextField].press(forDuration: 1.5)
         mozWaitForElementToExist(app.tables["Context Menu"])
-        app.tables.otherElements[AccessibilityIdentifiers.Photon.pasteAction].waitAndTap()
+        app.tables.buttons[AccessibilityIdentifiers.Photon.pasteAction].waitAndTap()
         let urlBar = app.textFields[AccessibilityIdentifiers.Browser.AddressToolbar.searchTextField]
         mozWaitForValueContains(urlBar, value: url)
     }

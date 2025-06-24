@@ -14,10 +14,13 @@ final class JumpBackInSectionStateTests: XCTestCase {
     override func setUp() {
         super.setUp()
         mockProfile = MockProfile()
+        DependencyHelperMock().bootstrapDependencies()
+        LegacyFeatureFlagsManager.shared.initializeDeveloperFeatures(with: MockProfile())
     }
 
     override func tearDown() {
         mockProfile = nil
+        DependencyHelperMock().reset()
         super.tearDown()
     }
 
@@ -37,7 +40,7 @@ final class JumpBackInSectionStateTests: XCTestCase {
             TabManagerAction(
                 recentTabs: [createTab(urlString: "www.mozilla.org")],
                 windowUUID: .XCTestDefaultUUID,
-                actionType: TabManagerMiddlewareActionType.fetchRecentTabs
+                actionType: TabManagerMiddlewareActionType.fetchedRecentTabs
             )
         )
 
@@ -69,6 +72,90 @@ final class JumpBackInSectionStateTests: XCTestCase {
         XCTAssertEqual(newState.mostRecentSyncedTab?.accessibilityLabel, "Tab pickup: Mozilla, Fake client")
     }
 
+    func test_toggleShowSectionSetting_withToggleOn_returnsExpectedState() {
+        let initialState = createSubject()
+        let reducer = jumpBackInSectionReducer()
+
+        let newState = reducer(
+            initialState,
+            JumpBackInAction(
+                isEnabled: true,
+                windowUUID: .XCTestDefaultUUID,
+                actionType: JumpBackInActionType.toggleShowSectionSetting
+            )
+        )
+
+        XCTAssertEqual(newState.windowUUID, .XCTestDefaultUUID)
+        XCTAssertTrue(newState.shouldShowSection)
+    }
+
+    func test_toggleShowSectionSetting_withToggleOff_returnsExpectedState() {
+        let initialState = createSubject()
+        let reducer = jumpBackInSectionReducer()
+
+        let newState = reducer(
+            initialState,
+            JumpBackInAction(
+                isEnabled: false,
+                windowUUID: .XCTestDefaultUUID,
+                actionType: JumpBackInActionType.toggleShowSectionSetting
+            )
+        )
+
+        XCTAssertEqual(newState.windowUUID, .XCTestDefaultUUID)
+        XCTAssertFalse(newState.shouldShowSection)
+    }
+
+    func test_sectionFlagEnabled_withoutUserPref_returnsExpectedState() {
+           setupNimbusHNTJumpBackInSectionTesting(isEnabled: true)
+
+           let initialState = createSubject()
+           XCTAssertTrue(initialState.shouldShowSection)
+       }
+
+       func test_sectionFlagDisabled_withoutUserPref_returnsExpectedState() {
+           setupNimbusHNTJumpBackInSectionTesting(isEnabled: false)
+
+           let initialState = createSubject()
+           XCTAssertFalse(initialState.shouldShowSection)
+       }
+
+       func test_sectionFlagEnabled_withUserPref_returnsExpectedState() {
+           setupNimbusHNTJumpBackInSectionTesting(isEnabled: true)
+
+           let initialState = createSubject()
+           let reducer = jumpBackInSectionReducer()
+
+           // Updates the jump back in section user pref
+           let newState = reducer(
+               initialState,
+               JumpBackInAction(
+                   isEnabled: false,
+                   windowUUID: .XCTestDefaultUUID,
+                   actionType: JumpBackInActionType.toggleShowSectionSetting
+               )
+           )
+           XCTAssertFalse(newState.shouldShowSection)
+       }
+
+       func test_sectionFlagDisabled_withUserPref_returnsExpectedState() {
+           setupNimbusHNTJumpBackInSectionTesting(isEnabled: false)
+
+           let initialState = createSubject()
+           let reducer = jumpBackInSectionReducer()
+
+           // Updates the jump back in section user pref
+           let newState = reducer(
+               initialState,
+               JumpBackInAction(
+                   isEnabled: true,
+                   windowUUID: .XCTestDefaultUUID,
+                   actionType: JumpBackInActionType.toggleShowSectionSetting
+               )
+           )
+           XCTAssertTrue(newState.shouldShowSection)
+       }
+
     // MARK: - Private
     private func createSubject() -> JumpBackInSectionState {
         return JumpBackInSectionState(windowUUID: .XCTestDefaultUUID)
@@ -82,6 +169,14 @@ final class JumpBackInSectionStateTests: XCTestCase {
         let tab = Tab(profile: mockProfile, windowUUID: .XCTestDefaultUUID)
         tab.url = URL(string: urlString)!
         return tab
+    }
+
+    private func setupNimbusHNTJumpBackInSectionTesting(isEnabled: Bool) {
+        FxNimbus.shared.features.hntJumpBackInSectionFeature.with { _, _ in
+            return HntJumpBackInSectionFeature(
+                enabled: isEnabled
+            )
+        }
     }
 
     var remoteClient: RemoteClient {

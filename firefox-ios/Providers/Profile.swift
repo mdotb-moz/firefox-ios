@@ -12,20 +12,24 @@ import Common
 import Account
 import Shared
 import Storage
-import Sync
 import AuthenticationServices
 
 import class MozillaAppServices.MZKeychainWrapper
+import class MozillaAppServices.RemoteSettingsService
+import struct MozillaAppServices.RemoteSettingsContext
 import enum MozillaAppServices.Level
+import enum MozillaAppServices.RemoteSettingsServer
 import enum MozillaAppServices.SyncReason
 import enum MozillaAppServices.VisitType
 import func MozillaAppServices.setLogger
 import func MozillaAppServices.setMaxLevel
+import func MozillaAppServices.getLocaleTag
 import struct MozillaAppServices.HistoryMigrationResult
 import struct MozillaAppServices.SyncParams
 import struct MozillaAppServices.SyncResult
 import struct MozillaAppServices.VisitObservation
 import struct MozillaAppServices.PendingCommand
+import struct MozillaAppServices.RemoteSettingsConfig2
 
 public protocol SyncManager {
     var isSyncing: Bool { get }
@@ -47,7 +51,6 @@ public protocol SyncManager {
     func onRemovedAccount() -> Success
     @discardableResult
     func onAddedAccount() -> Success
-    func updateCreditCardAutofillStatus(value: Bool)
 }
 
 /// This exists to pass in external context: e.g., the UIApplication can
@@ -57,10 +60,8 @@ public protocol FxACommandsDelegate: AnyObject {
     func closeTabs(for urls: [URL])
 }
 
-class ProfileFileAccessor: FileAccessor {
-    convenience init(profile: Profile) {
-        self.init(localName: profile.localName())
-    }
+struct ProfileFileAccessor: FileAccessor, Sendable {
+    public var rootPath: String
 
     init(localName: String, logger: Logger = DefaultLogger.shared) {
         let profileDirName = "profile.\(localName)"
@@ -73,10 +74,10 @@ class ProfileFileAccessor: FileAccessor {
         ) {
             rootPath = url.path
         } else {
-            rootPath = (NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)[0])
+            rootPath = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)[0]
         }
 
-        super.init(rootPath: URL(fileURLWithPath: rootPath).appendingPathComponent(profileDirName).path)
+        self.rootPath = URL(fileURLWithPath: rootPath).appendingPathComponent(profileDirName).path
     }
 }
 
@@ -88,13 +89,11 @@ protocol Profile: AnyObject {
     var places: RustPlaces { get }
     var prefs: Prefs { get }
     var queue: TabQueue { get }
-    #if !MOZ_TARGET_NOTIFICATIONSERVICE && !MOZ_TARGET_SHARETO && !MOZ_TARGET_CREDENTIAL_PROVIDER
-    var searchEnginesManager: SearchEnginesManager { get }
-    #endif
     var files: FileAccessor { get }
     var pinnedSites: PinnedSites { get }
     var logins: RustLogins { get }
     var firefoxSuggest: RustFirefoxSuggestProtocol? { get }
+    var remoteSettingsService: RemoteSettingsService? { get }
     var certStore: CertStore { get }
     var recentlyClosedTabs: ClosedTabsStore { get }
 
@@ -135,7 +134,7 @@ protocol Profile: AnyObject {
     func cleanupHistoryIfNeeded()
 
     @discardableResult
-    func storeTabs(_ tabs: [RemoteTab]) -> Deferred<Maybe<Int>>
+    func storeAndSyncTabs(_ tabs: [RemoteTab]) -> Deferred<Maybe<Int>>
 
     func addTabToCommandQueue(_ deviceId: String, url: URL)
     func removeTabFromCommandQueue(_ deviceId: String, url: URL)
@@ -215,7 +214,9 @@ extension Profile {
     }
 }
 
-open class BrowserProfile: Profile {
+// TODO: Removed unchecked flag with FXIOS-12610
+open class BrowserProfile: Profile,
+                           @unchecked Sendable {
     private let logger: Logger
     private lazy var directory: String = {
         do {
@@ -227,8 +228,11 @@ open class BrowserProfile: Profile {
             fatalError("Could not create directory at root path: \(error)")
         }
     }()
+    private var rustKeychainEnabled = false
+    private var loginsVerificationEnabled = false
     fileprivate let name: String
-    fileprivate let keychain: MZKeychainWrapper
+    fileprivate let keychain: RustKeychain
+    fileprivate let legacyKeychain: MZKeychainWrapper
     var isShutdown = false
 
     internal let files: FileAccessor
@@ -253,7 +257,8 @@ open class BrowserProfile: Profile {
      */
     init(localName: String,
          fxaCommandsDelegate: FxACommandsDelegate? = nil,
-         creditCardAutofillEnabled: Bool = false,
+         rustKeychainEnabled: Bool = false,
+         loginsVerificationEnabled: Bool = false,
          clear: Bool = false,
          logger: Logger = DefaultLogger.shared) {
         logger.log("Initing profile \(localName) on thread \(Thread.current).",
@@ -261,7 +266,10 @@ open class BrowserProfile: Profile {
                    category: .setup)
         self.name = localName
         self.files = ProfileFileAccessor(localName: localName)
-        self.keychain = MZKeychainWrapper.sharedClientAppContainerKeychain
+        self.rustKeychainEnabled = rustKeychainEnabled
+        self.loginsVerificationEnabled = loginsVerificationEnabled
+        self.keychain = KeychainManager.shared
+        self.legacyKeychain = KeychainManager.legacyShared
         self.logger = logger
         self.fxaCommandsDelegate = fxaCommandsDelegate
 
@@ -298,7 +306,11 @@ open class BrowserProfile: Profile {
             logger.log("New profile. Removing old Keychain/Prefs data.",
                        level: .info,
                        category: .setup)
-            MZKeychainWrapper.wipeKeychain()
+            if rustKeychainEnabled {
+                RustKeychain.wipeKeychain()
+            } else {
+                MZKeychainWrapper.wipeKeychain()
+            }
             prefs.clearAll()
         }
 
@@ -308,7 +320,8 @@ open class BrowserProfile: Profile {
         // Initiating the sync manager has to happen prior to the databases being opened,
         // because opening them can trigger events to which the SyncManager listens.
         self.syncManager = RustSyncManager(profile: self,
-                                           creditCardAutofillEnabled: creditCardAutofillEnabled)
+                                           rustKeychainEnabled: rustKeychainEnabled,
+                                           loginsVerificationEnabled: loginsVerificationEnabled)
 
         let notificationCenter = NotificationCenter.default
 
@@ -376,7 +389,7 @@ open class BrowserProfile: Profile {
         let visitType = VisitType.fromRawValue(rawValue: v)
         if let url = notification.userInfo!["url"] as? URL, !isIgnoredURL(url),
         let title = notification.userInfo!["title"] as? NSString {
-            // Only record local vists if the change notification originated from a non-private tab
+            // Only record local visits if the change notification originated from a non-private tab
             if !(notification.userInfo!["isPrivate"] as? Bool ?? false) {
                 let result = self.places.applyObservation(
                     visitObservation: VisitObservation(
@@ -469,13 +482,7 @@ open class BrowserProfile: Profile {
         isDirectory: true
     ).appendingPathComponent("autofill.db").path
 
-    lazy var autofill = RustAutofill(databasePath: autofillDbPath)
-
-    #if !MOZ_TARGET_NOTIFICATIONSERVICE && !MOZ_TARGET_SHARETO && !MOZ_TARGET_CREDENTIAL_PROVIDER
-    lazy var searchEnginesManager: SearchEnginesManager = {
-        return SearchEnginesManager(prefs: self.prefs, files: self.files)
-    }()
-    #endif
+    lazy var autofill = RustAutofill(databasePath: autofillDbPath, rustKeychainEnabled: rustKeychainEnabled)
 
     func makePrefs() -> Prefs {
         return NSUserDefaultsPrefs(prefix: self.localName())
@@ -561,8 +568,24 @@ open class BrowserProfile: Profile {
         }
     }
 
-    func storeTabs(_ tabs: [RemoteTab]) -> Deferred<Maybe<Int>> {
-        return self.tabs.setLocalTabs(localTabs: tabs)
+    // Store the tabs that we'll be syncing to other clients, and sync right after
+    func storeAndSyncTabs(_ tabs: [RemoteTab]) -> Deferred<Maybe<Int>> {
+        // Store local tabs into the DB
+        let res = self.tabs.setLocalTabs(localTabs: tabs)
+
+        // If for some reason we don't have a sync manager, just return
+        // the result of setLocalTabs
+        guard let syncManager = self.syncManager else { return res }
+
+        // Chain syncTabs after setLocalTabs has completed
+        return res.bind { result in
+            // Only sync if the local tabs were successfully set
+            return result.isSuccess
+                // Return the original result from setLocalTabs
+                ? syncManager.syncTabs().bind { _ in res }
+                // If setLocalTabs failed, just return its result
+                : res
+        }
     }
 
     func addTabToCommandQueue(_ deviceId: String, url: URL) {
@@ -673,8 +696,32 @@ open class BrowserProfile: Profile {
             fileURLWithPath: directory,
             isDirectory: true
         ).appendingPathComponent("loginsPerField.db").path
-        return RustLogins(databasePath: databasePath)
+        return RustLogins(databasePath: databasePath, rustKeychainEnabled: self.rustKeychainEnabled)
     }()
+
+    lazy var remoteSettingsService: RemoteSettingsService? = {
+        let useStaging = prefs.boolForKey(PrefsKeys.RemoteSettings.useQAStagingServerForRemoteSettings) == true
+        let server = useStaging ? RemoteSettingsServer.stage : RemoteSettingsServer.prod
+        let bucketName = (server == .prod ? "main" : "main-preview")
+        let config = RemoteSettingsConfig2(server: server,
+                                           bucketName: bucketName,
+                                           appContext: remoteSettingsAppContext())
+
+        let url = URL(fileURLWithPath: directory, isDirectory: true).appendingPathComponent("remote-settings")
+        let path = url.path
+
+        // Create the remote settings directory if needed
+        if !FileManager.default.fileExists(atPath: path) {
+            try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        }
+        let service = RemoteSettingsService(storageDir: path, config: config)
+        #if !MOZ_TARGET_NOTIFICATIONSERVICE && !MOZ_TARGET_SHARETO && !MOZ_TARGET_CREDENTIAL_PROVIDER
+        serviceSyncCoordinator = RemoteSettingsServiceSyncCoordinator(service: service, prefs: prefs)
+        #endif
+        return service
+    }()
+
+    private(set) var serviceSyncCoordinator: RemoteSettingsServiceSyncCoordinator?
 
     lazy var firefoxSuggest: RustFirefoxSuggestProtocol? = {
         do {
@@ -684,10 +731,17 @@ open class BrowserProfile: Profile {
                 appropriateFor: nil,
                 create: true
             ).appendingPathComponent("suggest.db", isDirectory: false)
-            return try RustFirefoxSuggest(
-                dataPath: URL(fileURLWithPath: directory, isDirectory: true).appendingPathComponent("suggest-data.db").path,
-                cachePath: cacheFileURL.path
-            )
+            if let rsService = remoteSettingsService {
+                return try RustFirefoxSuggest(
+                    dataPath: URL(
+                        fileURLWithPath: directory,
+                        isDirectory: true
+                    ).appendingPathComponent("suggest-data.db").path,
+                    cachePath: cacheFileURL.path,
+                    remoteSettingsService: rsService
+                )
+            }
+            return nil
         } catch {
             logger.log("Failed to open Firefox Suggest database: \(error.localizedDescription)",
                        level: .warning,
@@ -695,6 +749,31 @@ open class BrowserProfile: Profile {
             return nil
         }
     }()
+
+    private func remoteSettingsAppContext() -> RemoteSettingsContext {
+        let appInfo = BrowserKitInformation.shared
+        let uiDevice = UIDevice.current
+        let formFactor = switch uiDevice.userInterfaceIdiom {
+        case .pad: "tablet"
+        case .mac: "desktop"
+        default: "phone"
+        }
+        return RemoteSettingsContext(
+            channel: appInfo.buildChannel?.rawValue ?? "release",
+            appVersion: AppInfo.appVersion,
+            appId: AppInfo.bundleIdentifier,
+            /// `Locale.current.identifier` uses an underscore (e.g. “en_US”), which is not supported by RS.
+            /// Nimbus’s `getLocaleTag()` returns a Gecko-compatible locale (e.g. “en-US”).
+            /// In Gecko, we use BCP47 format, specifically `appLocaleAsBCP47`
+            /// See : https://searchfox.org/mozilla-central/rev/240ca3f/toolkit/modules/RustSharedRemoteSettingsService.sys.mjs#46
+            /// Once we drop support for iOS <16 we can support the proper  BCP47 by using `Locale.IdentifierType.bcp47`
+            /// See: https://developer.apple.com/documentation/foundation/locale/identifiertype/bcp47
+            locale: getLocaleTag(),
+            os: "iOS",
+            osVersion: uiDevice.systemVersion,
+            formFactor: formFactor,
+            country: Locale.current.regionCode)
+    }
 
     func hasAccount() -> Bool {
         return rustFxA.hasAccount()
@@ -722,24 +801,53 @@ open class BrowserProfile: Profile {
         prefs.removeObjectForKey(PrefsKeys.KeyLastRemoteTabSyncTime)
 
         // Save the keys that will be restored
-        let rustAutofillKey = RustAutofillEncryptionKeys()
-        let creditCardKey = keychain.string(forKey: rustAutofillKey.ccKeychainKey)
         let rustLoginsKeys = RustLoginEncryptionKeys()
-        let perFieldKey = keychain.string(forKey: rustLoginsKeys.loginPerFieldKeychainKey)
-        // Remove all items, removal is not key-by-key specific (due to the risk of failing to delete something),
-        // simply restore what is needed.
-        keychain.removeAllKeys()
+        let rustAutofillKey = RustAutofillEncryptionKeys()
+        var loginsKey: String?
+        var loginsCanary: String?
 
-        if let perFieldKey = perFieldKey {
-            keychain.set(
-                perFieldKey,
-                forKey: rustLoginsKeys.loginPerFieldKeychainKey,
-                withAccessibility: .afterFirstUnlock
-            )
-        }
+        var creditCardKey: String?
+        var creditCardCanary: String?
 
-        if let creditCardKey = creditCardKey {
-            keychain.set(creditCardKey, forKey: rustAutofillKey.ccKeychainKey, withAccessibility: .afterFirstUnlock)
+        if rustKeychainEnabled {
+            // Long before the new rust keychain logic was introduced, there was a bug in this logic caused by the canary not
+            // being saved with the key. We are correcting this in the new logic below but leaving the old logic unchanged.
+            // This is because we do not want to risk introducing another bug in the old code in case it is required as a
+            // fail safe should these changes need to be rolled back.
+
+            (creditCardKey, creditCardCanary) = keychain.getCreditCardKeyData()
+            (loginsKey, loginsCanary) = keychain.getLoginsKeyData()
+
+            // Remove all items, removal is not key-by-key specific (due to the risk of failing to delete something),
+            // simply restore what is needed.
+            keychain.removeAllKeys()
+
+            if let creditCardKey = creditCardKey, let creditCardCanary = creditCardCanary {
+                keychain.setCreditCardsKeyData(keyValue: creditCardKey, canaryValue: creditCardCanary)
+            }
+
+            if let loginsKey = loginsKey, let loginsCanary = loginsCanary {
+                keychain.setLoginsKeyData(keyValue: loginsKey, canaryValue: loginsCanary)
+            }
+        } else {
+            creditCardKey = legacyKeychain.string(forKey: rustAutofillKey.ccKeychainKey)
+            loginsKey = legacyKeychain.string(forKey: rustLoginsKeys.loginPerFieldKeychainKey)
+
+            // Remove all items, removal is not key-by-key specific (due to the risk of failing to delete something),
+            // simply restore what is needed.
+            legacyKeychain.removeAllKeys()
+
+            if let creditCardKey = creditCardKey {
+                legacyKeychain.set(creditCardKey,
+                                   forKey: rustAutofillKey.ccKeychainKey,
+                                   withAccessibility: .afterFirstUnlock)
+            }
+
+            if let loginsKey = loginsKey {
+                legacyKeychain.set(loginsKey,
+                                   forKey: rustLoginsKeys.loginPerFieldKeychainKey,
+                                   withAccessibility: .afterFirstUnlock)
+            }
         }
 
         // Tell any observers that our account has changed.

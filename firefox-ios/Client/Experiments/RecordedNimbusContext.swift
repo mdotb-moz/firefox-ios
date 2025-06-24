@@ -5,7 +5,6 @@
 import Common
 import Foundation
 import Glean
-import Shared
 
 import func MozillaAppServices.getCalculatedAttributes
 import func MozillaAppServices.getLocaleTag
@@ -20,7 +19,7 @@ private extension Double? {
     }
 }
 
-private extension Int32? {
+extension Int32? {
     func toInt64() -> Int64? {
         guard let self = self else { return nil }
         return Int64(self)
@@ -42,8 +41,9 @@ class RecordedNimbusContext: RecordedContext {
 
     var isFirstRun: Bool
     var isPhone: Bool
-    var isReviewCheckerEnabled: Bool
     var isDefaultBrowser: Bool
+    var isBottomToolbarUser: Bool
+    var hasEnabledTipsNotifications: Bool
     var appVersion: String?
     var region: String?
     var language: String?
@@ -57,8 +57,9 @@ class RecordedNimbusContext: RecordedContext {
     private var logger: Logger
 
     init(isFirstRun: Bool,
-         isReviewCheckerEnabled: Bool,
          isDefaultBrowser: Bool,
+         isBottomToolbarUser: Bool,
+         hasEnabledTipsNotifications: Bool,
          eventQueries: [String: String] = RecordedNimbusContext.EVENT_QUERIES,
          isPhone: Bool = UIDevice.current.userInterfaceIdiom == .phone,
          bundle: Bundle = Bundle.main,
@@ -69,8 +70,9 @@ class RecordedNimbusContext: RecordedContext {
 
         self.isFirstRun = isFirstRun
         self.isPhone = isPhone
-        self.isReviewCheckerEnabled = isReviewCheckerEnabled
         self.isDefaultBrowser = isDefaultBrowser
+        self.isBottomToolbarUser = isBottomToolbarUser
+        self.hasEnabledTipsNotifications = hasEnabledTipsNotifications
 
         let info = bundle.infoDictionary ?? [:]
         appVersion = info["CFBundleShortVersionString"] as? String
@@ -130,7 +132,6 @@ class RecordedNimbusContext: RecordedContext {
             GleanMetrics.NimbusSystem.RecordedNimbusContextObject(
                 isFirstRun: isFirstRun,
                 eventQueryValues: eventQueryValuesObject,
-                isReviewCheckerEnabled: isReviewCheckerEnabled,
                 isPhone: isPhone,
                 appVersion: appVersion,
                 locale: locale,
@@ -138,9 +139,12 @@ class RecordedNimbusContext: RecordedContext {
                 daysSinceUpdate: daysSinceUpdate.toInt64(),
                 language: language,
                 region: region,
-                isDefaultBrowser: isDefaultBrowser
+                isDefaultBrowser: isDefaultBrowser,
+                isBottomToolbarUser: isBottomToolbarUser,
+                hasEnabledTipsNotifications: hasEnabledTipsNotifications
             )
         )
+        GleanMetrics.Pings.shared.nimbus.submit()
         logger.log("record end", level: .debug, category: .experiments)
     }
 
@@ -170,7 +174,6 @@ class RecordedNimbusContext: RecordedContext {
             "is_first_run": isFirstRun,
             "isFirstRun": "\(isFirstRun)",
             "is_phone": isPhone,
-            "is_review_checker_enabled": isReviewCheckerEnabled,
             "events": eventQueryValues,
             "app_version": appVersion as Any,
             "region": region as Any,
@@ -179,6 +182,8 @@ class RecordedNimbusContext: RecordedContext {
             "days_since_install": daysSinceInstall as Any,
             "days_since_update": daysSinceUpdate as Any,
             "is_default_browser": isDefaultBrowser,
+            "is_bottom_toolbar_user": isBottomToolbarUser,
+            "has_enabled_tips_notifications": hasEnabledTipsNotifications,
         ]),
             let jsonString = NSString(data: data, encoding: String.Encoding.utf8.rawValue) as? String
         else {

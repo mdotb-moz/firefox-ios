@@ -162,15 +162,13 @@ class ShareLongPressTests: BaseTestCase {
     private func longPressLinkAndSelectShareOption(option: String) {
         navigator.openURL(path(forTestPage: "test-example.html"))
         waitUntilPageLoad()
-        app.links.element(boundBy: 0).press(forDuration: 1.0)
+        app.links.element(boundBy: 0).press(forDuration: 1.5)
         mozWaitForElementToExist(app.buttons["Open in New Tab"])
-        if !iPad() {
-            app.swipeUp()
-        }
         app.buttons["Share Link"].waitAndTap()
         if #available(iOS 16, *) {
             mozWaitForElementToExist(app.collectionViews.cells[option])
-            app.collectionViews.cells[option].tapOnApp()
+            app.collectionViews.cells[option].waitAndTap()
+            app.collectionViews.cells[option].tapIfExists()
         } else {
             app.buttons[option].waitAndTap()
         }
@@ -188,7 +186,7 @@ class ShareLongPressTests: BaseTestCase {
         // Long-press on a website
         app.tables.cells.staticTexts.firstMatch.press(forDuration: 1.0)
         // Tap the Share button in the context menu
-        app.tables["Context Menu"].cells.otherElements["shareLarge"].waitAndTap()
+        app.tables["Context Menu"].buttons["shareLarge"].waitAndTap()
         // Tap the Reminders button in the menu
         if #available(iOS 16, *) {
             mozWaitForElementToExist(app.collectionViews.cells[option])
@@ -207,7 +205,7 @@ class ShareLongPressTests: BaseTestCase {
         // Long-press on a website
         app.tables.cells.staticTexts.element(boundBy: 1).press(forDuration: 1.0)
         // Tap the Share button in the context menu
-        app.tables["Context Menu"].cells.otherElements["shareLarge"].waitAndTap()
+        app.tables["Context Menu"].buttons["shareLarge"].waitAndTap()
         // Tap the Reminders button in the menu
         if #available(iOS 16, *) {
             mozWaitForElementToExist(app.collectionViews.cells[option])
@@ -229,7 +227,7 @@ class ShareLongPressTests: BaseTestCase {
         // Long-press on a bookmarked website
         app.tables.cells.staticTexts["Example Domain"].press(forDuration: 1.0)
         // Tap the Share button in the context menu
-        app.tables["Context Menu"].cells.otherElements["shareLarge"].waitAndTap()
+        app.tables["Context Menu"].buttons["shareLarge"].waitAndTap()
         // Tap the Reminders button in the menu
         if #available(iOS 16, *) {
             mozWaitForElementToExist(app.collectionViews.cells[option])
@@ -245,7 +243,7 @@ class ShareLongPressTests: BaseTestCase {
         app.collectionViews
             .cells.matching(identifier: AccessibilityIdentifiers.FirefoxHomepage.Pocket.itemCell)
             .staticTexts.firstMatch.press(forDuration: 1.5)
-        app.tables["Context Menu"].cells.otherElements["shareLarge"].waitAndTap()
+        app.tables["Context Menu"].buttons["shareLarge"].waitAndTap()
         if #available(iOS 16, *) {
             mozWaitForElementToExist(app.collectionViews.cells[option])
             app.collectionViews.cells[option].tapOnApp()

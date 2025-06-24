@@ -76,7 +76,7 @@ class LoginsHelper: TabContentScript, FeatureFlaggable {
     }
 
     private func getOrigin(_ uriString: String, allowJS: Bool = false) -> String? {
-        guard let uri = URL(string: uriString, invalidCharacters: false),
+        guard let uri = URL(string: uriString),
               let scheme = uri.scheme, !scheme.isEmpty,
               let host = uri.host
         else {
@@ -136,27 +136,36 @@ class LoginsHelper: TabContentScript, FeatureFlaggable {
               let type = res["type"] as? String
         else { return }
 
-        if self.featureFlags.isFeatureEnabled(.passwordGenerator, checking: .buildOnly) {
-            if type == "generatePassword",
-                let tab = self.tab,
-                !tab.isPrivate,
-                profile.prefs.boolForKey("saveLogins") ?? true {
-                let userDefaults = UserDefaults.standard
-                let showPasswordGeneratorClosure = {
-                    let newAction = GeneralBrowserAction(
-                        frame: message.frameInfo,
-                        windowUUID: tab.windowUUID,
-                        actionType: GeneralBrowserActionType.showPasswordGenerator)
+        // NOTE(FXIOS-12024): This is added only to be able t oswitch between implementations inside the JS.
+        // Once we rollout the update for all users, this will be removed.
+        if type == "ready" {
+            LoginsHelper.setUpdatedPasswordEnabled(with: self.tab)
+            return
+        }
 
-                    store.dispatch(newAction)
-                }
-                if userDefaults.value(forKey: PrefsKeys.PasswordGeneratorShown) == nil {
-                    userDefaults.set(true, forKey: PrefsKeys.PasswordGeneratorShown)
-                    showPasswordGeneratorClosure()
-                } else {
-                    tab.webView?.accessoryView.useStrongPasswordClosure = showPasswordGeneratorClosure
-                    tab.webView?.accessoryView.reloadViewFor(.passwordGenerator)
-                }
+        if type == "clearAccessoryView" {
+            tab?.webView?.accessoryView.reloadViewFor(.standard)
+        }
+
+        if type == "generatePassword",
+            let tab = self.tab,
+            !tab.isPrivate,
+            profile.prefs.boolForKey("saveLogins") ?? true {
+            let userDefaults = UserDefaults.standard
+            let showPasswordGeneratorClosure = {
+                let newAction = GeneralBrowserAction(
+                    frame: message.frameInfo,
+                    windowUUID: tab.windowUUID,
+                    actionType: GeneralBrowserActionType.showPasswordGenerator)
+
+                store.dispatchLegacy(newAction)
+            }
+            if userDefaults.value(forKey: PrefsKeys.PasswordGeneratorShown) == nil {
+                userDefaults.set(true, forKey: PrefsKeys.PasswordGeneratorShown)
+                showPasswordGeneratorClosure()
+            } else {
+                tab.webView?.accessoryView.useStrongPasswordClosure = showPasswordGeneratorClosure
+                tab.webView?.accessoryView.reloadViewFor(.passwordGenerator)
             }
         }
 
@@ -247,8 +256,7 @@ class LoginsHelper: TabContentScript, FeatureFlaggable {
     private func promptSave(_ login: LoginEntry) {
         guard login.isValid.isSuccess else { return }
 
-        if self.featureFlags.isFeatureEnabled(.passwordGenerator, checking: .buildOnly) &&
-            profile.prefs.boolForKey("saveLogins") ?? true &&
+        if profile.prefs.boolForKey("saveLogins") ?? true &&
             tab?.isPrivate == false {
             clearStoredPasswordAfterGeneration(origin: login.hostname)
         }
@@ -371,7 +379,7 @@ class LoginsHelper: TabContentScript, FeatureFlaggable {
             let action = PasswordGeneratorAction(windowUUID: windowUUID,
                                                  actionType: PasswordGeneratorActionType.clearGeneratedPasswordForSite,
                                                  origin: origin)
-            store.dispatch(action)
+            store.dispatchLegacy(action)
         }
     }
 
@@ -390,6 +398,13 @@ class LoginsHelper: TabContentScript, FeatureFlaggable {
     public static func yieldFocusBackToField(with tab: Tab) {
         let jsFocusCallback = "window.__firefox__.logins.yieldFocusBackToField()"
         tab.webView?.evaluateJavascriptInDefaultContentWorld(jsFocusCallback)
+    }
+
+    public static func setUpdatedPasswordEnabled(with tab: Tab?) {
+        guard let tab = tab else { return }
+        let status = LegacyFeatureFlagsManager.shared.isFeatureEnabled(.updatedPasswordManager, checking: .buildOnly)
+        let jsUpdatedPasswordEnabled = "window.__firefox__.logins.isUpdatedPasswordManagerEnabled(\(status))"
+        tab.webView?.evaluateJavascriptInDefaultContentWorld(jsUpdatedPasswordEnabled)
     }
 
     // MARK: Theming System

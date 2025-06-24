@@ -3,7 +3,7 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/
 
 import Foundation
-import Common
+import XCTest
 
 class ToolbarMenuTests: BaseTestCase {
     override func tearDown() {
@@ -39,8 +39,8 @@ class ToolbarMenuTests: BaseTestCase {
         } else {
             mozWaitForElementToExist(tabsButton)
             XCTAssertTrue(
-                hamburgerMenu.isRightOf(rightElement: tabsButton),
-                "Menu button is not on the right side of tabs button"
+                hamburgerMenu.isLeftOf(rightElement: tabsButton),
+                "Menu button is not on the left side of tabs button"
             )
             XCTAssertTrue(
                 hamburgerMenu.isBelow(element: firstPocketCell),
@@ -63,8 +63,8 @@ class ToolbarMenuTests: BaseTestCase {
             ]
         )
         XCTAssertTrue(
-            hamburgerMenu.isRightOf(rightElement: tabsButton),
-            "Menu button is not on the right side of tabs button"
+            hamburgerMenu.isLeftOf(rightElement: tabsButton),
+            "Menu button is not on the left side of tabs button"
         )
         XCTAssertTrue(
             hamburgerMenu.isAbove(element: firstPocketCell),

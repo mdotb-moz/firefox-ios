@@ -16,15 +16,15 @@ protocol TopSitesManagerInterface {
     func fetchSponsoredSites() async -> [Site]
 
     /// Returns a list of top sites used to show the user
-    /// 
+    ///
     /// Top sites are composed of pinned sites, history, sponsored tiles and google top site.
     /// In terms of space, pinned tiles has precedence over the Google tile,
     /// which has precedence over sponsored and frecency tiles.
-    /// 
+    ///
     /// From a user perspective, Google top site is always first (from left to right),
     /// then comes the sponsored tiles, pinned sites and then frecency top sites.
     /// We only add Google or sponsored tiles if number of pinned tiles doesn't exceed the available number shown of tiles.
-    /// 
+    ///
     /// - Parameters:
     ///   - otherSites: Contains the user's pinned sites, history, and default suggested sites.
     ///   - sponsoredSites: Contains the sponsored sites.
@@ -52,6 +52,7 @@ class TopSitesManager: TopSitesManagerInterface, FeatureFlaggable {
     private let searchEnginesManager: SearchEnginesManagerProvider
     private let unifiedAdsProvider: UnifiedAdsProviderInterface
     private let dispatchQueue: DispatchQueueInterface
+    private let notification: NotificationProtocol
 
     private let maxTopSites: Int
     private let maxNumberOfSponsoredTile = 2
@@ -65,6 +66,7 @@ class TopSitesManager: TopSitesManagerInterface, FeatureFlaggable {
         searchEnginesManager: SearchEnginesManagerProvider,
         logger: Logger = DefaultLogger.shared,
         dispatchQueue: DispatchQueueInterface = DispatchQueue.main,
+        notification: NotificationProtocol = NotificationCenter.default,
         maxTopSites: Int = 4 * 14 // Max rows * max tiles on the largest screen plus some padding
     ) {
         self.profile = profile
@@ -75,6 +77,7 @@ class TopSitesManager: TopSitesManagerInterface, FeatureFlaggable {
         self.searchEnginesManager = searchEnginesManager
         self.logger = logger
         self.dispatchQueue = dispatchQueue
+        self.notification = notification
         self.maxTopSites = maxTopSites
     }
 
@@ -139,7 +142,7 @@ class TopSitesManager: TopSitesManagerInterface, FeatureFlaggable {
     }
 
     private var shouldLoadSponsoredTiles: Bool {
-        return profile.prefs.boolForKey(PrefsKeys.UserFeatureFlagPrefs.SponsoredShortcuts) ?? true
+        return featureFlags.isFeatureEnabled(.hntSponsoredShortcuts, checking: .userOnly)
     }
 
     private func filterSponsoredSites(
@@ -164,7 +167,7 @@ class TopSitesManager: TopSitesManagerInterface, FeatureFlaggable {
     private func shouldShowSponsoredSite(with sponsoredSite: Site, and otherSites: [TopSiteConfiguration]) -> Bool {
         let siteDomain = sponsoredSite.url.asURL?.shortDomain
         let sponsoredSiteIsAlreadyPresent = otherSites.contains { (topSite: TopSiteConfiguration) in
-            (topSite.site.url.asURL?.shortDomain == siteDomain) && (topSite.isPinned)
+            (topSite.shortDomain == siteDomain) && (topSite.isPinned)
         }
 
         let shouldAddDefaultEngine = SponsoredTileDataUtility().shouldAdd(
@@ -214,8 +217,8 @@ class TopSitesManager: TopSitesManagerInterface, FeatureFlaggable {
                 return state
             }
 
-            let siteDomain = state.site.url.asURL?.shortDomain
-            let shouldAddSite = !previousStates.contains(where: { $0.site.url.asURL?.shortDomain == siteDomain })
+            let siteDomain = state.shortDomain
+            let shouldAddSite = !previousStates.contains(where: { $0.shortDomain == siteDomain })
 
             // If shouldAddSite or site domain was not found, then insert the site
             guard shouldAddSite || siteDomain == nil else { return nil }
@@ -234,7 +237,7 @@ class TopSitesManager: TopSitesManagerInterface, FeatureFlaggable {
     }
 
     func pinTopSite(_ site: Site) {
-        _ = profile.pinnedSites.addPinnedTopSite(site)
+        profile.pinnedSites.addPinnedTopSite(site)
     }
 
     func unpinTopSite(_ site: Site) {
@@ -247,7 +250,7 @@ class TopSitesManager: TopSitesManagerInterface, FeatureFlaggable {
         // We make sure to remove all history for URL so it doesn't show anymore in the
         // top sites, this is the approach that Android takes too.
         profile.places.deleteVisitsFor(url: site.url).uponQueue(.main) { [weak self] _ in
-            NotificationCenter.default.post(name: .TopSitesUpdated, object: self)
+            self?.notification.post(name: .TopSitesUpdated, withObject: self)
         }
     }
 }
