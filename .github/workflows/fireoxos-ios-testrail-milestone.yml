@@ -24,5 +24,3 @@ jobs:
           testrail-host: ${{ secrets.TESTRAIL_HOST }}
           testrail-username: ${{ secrets.TESTRAIL_USERNAME }}
           testrail-api-key: ${{ secrets.TESTRAIL_PASSWORD }}
-        env:
-          SLACK_MOBILE_ALERTS_SANDBOX_CHANNEL: ${{ secrets.SLACK_MOBILE_ALERTS_SANDBOX_CHANNEL }}
