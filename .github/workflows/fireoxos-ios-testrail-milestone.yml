@@ -23,4 +23,5 @@ jobs:
           release-tag: ${{ github.event.release.tag_name }}
           testrail-host: ${{ secrets.TESTRAIL_HOST }}
           testrail-username: ${{ secrets.TESTRAIL_USERNAME }}
-          testrail-api-key: ${{ secrets.TESTRAIL_PASSWORD }}  
+          testrail-api-key: ${{ secrets.TESTRAIL_PASSWORD }}
+          webhook_url: ${{ secrets.SLACK_MOBILE_ALERTS_SANDBOX_CHANNEL }}
