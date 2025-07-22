@@ -16,7 +16,7 @@ jobs:
           echo "Tag: ${{ github.event.release.tag_name }}"
           echo "Release Name: ${{ github.event.release.name }}"
           echo "Body: ${{ github.event.release.body }}"
-          echo "Slack Webhook Url: ${{ secrets.SLACK_MOBILE_ALERTS_SANDBOX_CHANNEL }}"
+          echo "Slack Webhook Url: ${{ secrets.WEBHOOK_SLACK_MOBILE_ALERTS_SANDBOX_CHANNEL }}"
           echo "Massimo"
       - name: Run the reusable action from branch
         uses: mozilla-mobile/testops-tools/.github/actions/firefox-ios-milestone@mb/firefox-ios-milestone
@@ -26,4 +26,4 @@ jobs:
           testrail-host: ${{ secrets.TESTRAIL_HOST }}
           testrail-username: ${{ secrets.TESTRAIL_USERNAME }}
           testrail-api-key: ${{ secrets.TESTRAIL_PASSWORD }}
-          slack_webhook_url: ${{ secrets.SLACK_MOBILE_ALERTS_SANDBOX_CHANNEL }}
+          slack_webhook_url: ${{ secrets.WEBHOOK_SLACK_MOBILE_ALERTS_SANDBOX_CHANNEL }}
