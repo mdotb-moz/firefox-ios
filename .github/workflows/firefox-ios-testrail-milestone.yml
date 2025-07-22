@@ -1,4 +1,4 @@
-name: On New Release
+name: Create Test Rail Milestone
 
 on:
   release:
