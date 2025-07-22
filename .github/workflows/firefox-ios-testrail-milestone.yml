@@ -2,7 +2,7 @@ name: Create Test Rail Milestone
 
 on:
   release:
-    types: [published]  # Trigger only when a release is published
+    types: [published, created]  # Trigger only when a release is published
 
 jobs:
   handle-new-release:
