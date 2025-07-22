@@ -11,6 +11,7 @@ jobs:
     steps:
       - name: Print Release Info
         run: |
+          echo "Massimo 0"
           echo "New release published!"
           echo "Tag: ${{ github.event.release.tag_name }}"
           echo "Release Name: ${{ github.event.release.name }}"
